@@ -44,7 +44,8 @@ finds the scene in one query (~80 ms). `search()` adds a sentence reranker on to
 second.
 
 60 questions over 6 videos from one program, written by the authors. The paired test is how we tell
-signal from noise. [Full results, caption ablation and limits](https://github.com/ranfysvalle02/cinematlas/blob/main/bench/RESULTS.md).
+signal from noise. [Full results, caption ablation and limits](https://github.com/ranfysvalle02/cinematlas/blob/main/bench/RESULTS.md) ·
+[the story: fuse in the embedding, not in the ranking](https://github.com/ranfysvalle02/cinematlas/blob/main/blog.md).
 
 ---
 
