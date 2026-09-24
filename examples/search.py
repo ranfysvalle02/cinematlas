@@ -1,6 +1,6 @@
 """Ask a question, get the second in the video that answers it.
 
-    uv run python examples/search.py "how loud is a sonic boom?"
+    uv run python examples/search.py "where did the pilot grow up?"
     uv run python examples/search.py "a little girl standing on hay bales"
     uv run python examples/search.py --adaptive "what did he say about his first flight?"
 

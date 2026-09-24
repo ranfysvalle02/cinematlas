@@ -5,13 +5,15 @@
 ```bash
 pip install "cinematlas[whisper]"
 cinematlas doctor
-cinematlas ingest "www.b.com/keynote.mp4"
-cinematlas search "when do they announce pricing?"
+cinematlas ingest "https://www.youtube.com/watch?v=5NhYvbMdbBU"
+cinematlas search "how loud is a sonic boom?"
 ```
 
 ```text
- 1. vid_3f2a…#12 @    7:11  Pricing starts at ten dollars a seat.
-    https://www.b.com/keynote.mp4#t=431
+ 1. 5NhYvbMdbBU#11 @    0:56  Sonic booms can be about as loud as a balloon popping.
+    https://www.youtube.com/watch?v=5NhYvbMdbBU&t=56s
+ 2. 5NhYvbMdbBU#10 @    0:51  These sonic booms are really loud.
+    https://www.youtube.com/watch?v=5NhYvbMdbBU&t=51s
 ```
 
 ---
@@ -34,7 +36,7 @@ into **one** vector, so there's nothing to reconcile.
 
 **It holds on video we never tuned on.** The held-out corpus is a different domain (a silent station
 tour, astronaut Q&A, science demos; 386 scenes, no burned-in captions), with 80 questions written by an
-agent that saw only the videos, never the code or results.
+AI agent that saw only the videos, never the code or results.
 
 **It isn't reading subtitles.** On the first corpus, where every frame has burned-in captions, cropping
 them made keyframes alone worse on speech (0.53 → 0.40) but left the joint vector intact (0.73 → 0.77).
@@ -42,8 +44,8 @@ them made keyframes alone worse on speech (0.53 → 0.40) but left the joint vec
 **So the default ranks with that one vector.** `search()` finds scenes with the joint vector and uses a
 sentence reranker only to pick the exact second. The router we built to rescue merged rankings ties it on
 both corpora (p = 1.0 and p = 0.69) at about twice the latency, so it's now opt-in. The two do differ: the
-default is better on questions about what was shown, routing leans ahead on what was said. If your users
-mostly ask about speech, pass `routing="adaptive"`.
+default is better on questions about what was shown; routing leans ahead on what was said and lands on
+the exact second more often. If your users mostly ask about speech, pass `routing="adaptive"`.
 
 [Full results, both corpora, caption ablation and limits](https://github.com/ranfysvalle02/cinematlas/blob/main/bench/RESULTS.md) ·
 [the story: fuse in the embedding, not in the ranking](https://github.com/ranfysvalle02/cinematlas/blob/main/blog.md).
@@ -63,15 +65,15 @@ from cinematlas import Cinematlas
 engine = Cinematlas()
 engine.ensure_indexes()                                  # once; idempotent
 
-engine.ingest("https://www.youtube.com/watch?v=5NhYvbMdbBU")
+engine.ingest("https://www.youtube.com/watch?v=5NhYvbMdbBU")   # NASA: 60 Second Science, Sonic Booms
 engine.ingest("lecture.mov")                             # or a URL, bytes, file object, web upload
 
 results = engine.search("how loud is a sonic boom?")     # the scene, down to the second
-results.top.link                                         # 'https://…#t=34'
-results.top.text                                         # 'Sonic booms are about 110 decibels.'
+results.top.link                                         # 'https://www.youtube.com/watch?v=5NhYvbMdbBU&t=56s'
+results.top.text                                         # 'Sonic booms can be about as loud as a balloon popping.'
 results.top.explain()                                    # rank per source, relevance, score
 
-engine.search_scene_vector("a baby's hand holding a finger")   # joint vector only: the scene, ~80 ms
+engine.search_scene_vector("an airplane in the sky")    # the joint vector alone: scenes only, ~100 ms
 ```
 
 Results are plain dicts underneath (`json.dumps` works). Cinematlas doesn't pick an LLM for you;
@@ -145,16 +147,16 @@ video replaces it without a gap.
 cinematlas doctor                        # checks the deployment and prints the exact fix for each problem
 cinematlas setup [--update]              # create indexes; --update upgrades them in place
 cinematlas ingest <url|path|->           # progress on stderr, JSON on stdout
-cinematlas search "<question>" [-k 5] [--by hybrid|transcript|visual|text] [--format table|json|context]
+cinematlas search "<question>" [-k 5] [--by hybrid|adaptive|transcript|visual|text] [--format table|json|context]
 ```
 
 Global options: `--uri`, `--db`, `--collection`, `--transcript-mode`, `-v`.
 
 ## Atlas features used
 
-`$rankFusion` (8.0+) for one-query hybrid retrieval, `$rerank` (8.3+) for in-database sentence
-reranking, Automated Embedding for transcripts, Atlas Search for BM25, scalar quantization and BSON
-float32 vectors. Each has an equivalent fallback, and `cinematlas doctor` tells you which path is in use.
+Atlas Vector Search for the joint vectors, `$rerank` (8.3+) for in-database sentence reranking,
+`$rankFusion` (8.0+) for adaptive routing's one-query fusion, Automated Embedding for transcripts,
+Atlas Search for BM25, scalar quantization and BSON float32 vectors. Each has an equivalent fallback, and `cinematlas doctor` tells you which path is in use.
 
 ## Development
 

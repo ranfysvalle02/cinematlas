@@ -1,6 +1,6 @@
 [project]
 name = "cinematlas"
-version = "0.5.0"
+version = "0.5.1"
 description = "Search inside video down to the second: one joint keyframe+speech vector per scene on MongoDB Atlas and Voyage AI, with sentence-level reranking."
 readme = "README.md"
 license = "MIT"

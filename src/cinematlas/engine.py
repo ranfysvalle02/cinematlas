@@ -74,7 +74,7 @@ DEFAULT_MAX_DOWNLOAD_MB = 2048
 DEFAULT_MAX_SCENE_SECONDS = 30.0
 DEFAULT_RERANK_MODEL = "rerank-2.5"
 SOURCES = ("visual", "scene", "transcript", "text")
-# Tuned on bench/ (30 labelled questions, 6 videos): the keyframe list is noisy for questions
+# Fusion weights, tuned on bench/'s first corpus: the keyframe list is noisy for questions
 # about speech, so it acts as a tie-breaker; the sentence-level reranker carries the most signal.
 DEFAULT_WEIGHTS = {"visual": 0.25, "scene": 1.0, "transcript": 1.0, "text": 1.0, "rerank": 2.0}
 # Default search is scene-first: one joint keyframe+speech vector per scene ranks the scenes and the

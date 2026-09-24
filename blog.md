@@ -21,9 +21,9 @@ decision right and a lot of machinery you thought you needed goes away.
 The obvious architecture is the one we built first, and the one most multimodal RAG tutorials still
 teach:
 
-1. Transcribe the speech. Embed the sentences. Index them.
+1. Transcribe the speech. Embed the sentences. Index them, plus full-text search.
 2. Extract keyframes. Embed the images. Index them.
-3. At query time, search both indexes, then merge the two ranked lists with Reciprocal Rank Fusion.
+3. At query time, search every index, then merge the ranked lists with Reciprocal Rank Fusion.
 4. Rerank the merged candidates.
 
 It's modular, each part is testable, each index is simple, and it feels like good engineering.
@@ -34,10 +34,10 @@ It scored **0.65**.
 | --- | --- | --- | --- |
 | transcript + reranker | **0.90** | 0.43 | 0.67 |
 | keyframes | 0.53 | **0.90** | 0.72 |
-| both, merged with tuned rank fusion + reranker | 0.80 | 0.50 | 0.65 |
+| every index, merged with tuned rank fusion + reranker | 0.80 | 0.50 | 0.65 |
 
-Read the last row carefully. We took the best speech retriever and the best visual retriever, combined
-them, and got something **worse than either one on its own**, on average. It lost the visual questions
+Read the last row carefully. We took the best speech retriever and the best visual retriever, merged
+them with everything else we had, and got something **worse than either one on its own**, on average. It lost the visual questions
 the keyframes were winning (0.90 → 0.50), and it didn't even keep the speech questions (0.90 → 0.80).
 
 ## Why merging ranked lists fails
@@ -76,8 +76,9 @@ One scene, one vector, picture and speech in the same space.
 
 We'd labeled it "fast mode." It scored **0.83**.
 
-No router, no reranker, no calibration, no fusion weights. One vector search, in about **80 ms** against
-**475 ms** for the routed pipeline.
+It had been one of the lists in the merge all along, where the averaging drowned it out. On its own: no
+router, no reranker, no calibration, no fusion weights. One vector search, at about a fifth of the
+routed pipeline's latency.
 
 A tie on a 60-question benchmark proves nothing by itself: one question is 3.3 points. So we stopped
 comparing averages and compared **questions**. Only questions where exactly one system is right carry
@@ -131,8 +132,8 @@ So we built a second benchmark designed to break it:
   walkthrough, an astronaut answering questions about space toilets, science demos and a food lab. 386
   scenes, six times the first corpus.
 - **No burned-in captions.**
-- **Questions we didn't write.** An agent saw only the keyframes and transcripts, never the code or any
-  results, and wrote 40 speech and 40 visual questions.
+- **Questions we didn't write.** An AI agent saw only the keyframes and transcripts, never the code or
+  any results, and wrote 40 speech and 40 visual questions.
 - **Nothing tuned on it.** Weights and thresholds stayed exactly as the first corpus set them.
 
 Before running it, we wrote down the decision it would settle: *if ranking by the joint vector alone is
@@ -158,8 +159,9 @@ at under half the latency.
   reranker scores only the sentences inside the scenes the vector found, and picks the one that answers.
 - **The router is opt-in.** Here's the honest part: it ties overall, but not everywhere. Ranking by the
   joint vector is better on questions about what was *shown* (9 vs 0 on the held-out set, p = 0.004). The
-  router leans ahead on what was *said*, in both corpora, though neither gap is significant on its own.
-  If your users mostly ask about speech, `routing="adaptive"` is one argument away.
+  router leans ahead on what was *said*, in both corpora, though neither gap is significant on its own,
+  and when it finds the right scene it lands on the exact second more often (0.85 vs 0.71 on the held-out
+  set). If your users mostly ask about speech, `routing="adaptive"` is one argument away.
 
 We could have tuned the default until the speech gap closed. But the held-out set only means something if
 nobody tunes on it, so the default is what the rule we wrote down said it should be.
@@ -186,8 +188,9 @@ Two corpora, both NASA, 140 questions in total. The paired test tells us which g
 are better than one, but lectures, sports, surveillance and meetings could still behave differently. The
 router's per-category lean toward speech is consistent but not yet significant, and more speech-heavy
 data would settle it. Adaptive routing also isn't perfectly repeatable: between two runs it changed its
-answer on one held-out question. Everything here reproduces from the repo; both corpora, the caption ablation and
-the limits are in
+answer on one held-out question.
+
+Everything here reproduces from the repo. Both corpora, the caption ablation and the limits are in
 [bench/RESULTS.md](https://github.com/ranfysvalle02/cinematlas/blob/main/bench/RESULTS.md). If you run
 it on your own video and it breaks, we want to know.
 
@@ -196,7 +199,7 @@ it on your own video and it breaks, we want to know.
 ```bash
 pip install "cinematlas[whisper]"
 cinematlas ingest "https://www.youtube.com/watch?v=5NhYvbMdbBU"
-cinematlas search "how loud is a sonic boom?"
+cinematlas search "how loud is a sonic boom?"   # → 0:56 "about as loud as a balloon popping"
 ```
 
 [github.com/ranfysvalle02/cinematlas](https://github.com/ranfysvalle02/cinematlas) · MIT ·

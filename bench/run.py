@@ -278,8 +278,11 @@ def held_out(eng: Cinematlas, first: list[dict]) -> list[str]:
         verdict,
         "",
         "**Where scene-first and routing differ.** They tie overall, but not per category: scene-first is better on "
-        "questions about what was shown, routing leans ahead on what was said. If your users mostly ask about "
-        "speech, pass `routing=\"adaptive\"`.",
+        "questions about what was shown, routing leans ahead on what was said. Routing also lands on the exact "
+        f"second more often when it finds the right scene (Moment@1 {ad['speech']['moment@1']:.2f} vs "
+        f"{sf['speech']['moment@1']:.2f} here, {f_ad['speech']['moment@1']:.2f} vs "
+        f"{f_sf['speech']['moment@1']:.2f} on the first corpus). If your users mostly ask about speech, pass "
+        "`routing=\"adaptive\"`.",
         "",
         "| Corpus | Questions | Scene-first | Routing | Scene-first only | Routing only | p |",
         "| --- | --- | --- | --- | --- | --- | --- |",
