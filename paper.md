@@ -1,6 +1,6 @@
 # Fuse in the embedding, not in the ranking
 
-**Early vs late fusion for multimodal retrieval: three corpora, four pre-stated predictions**
+**Early vs late fusion for multimodal retrieval: three corpora, seven pre-stated predictions**
 
 *Cinematlas project · September 2026 · all code, corpora, questions and results:
 [github.com/ranfysvalle02/cinematlas](https://github.com/ranfysvalle02/cinematlas)*
@@ -14,7 +14,9 @@ and merge the ranked lists, typically with Reciprocal Rank Fusion (late fusion).
 embedding each record's signals together into one vector with a multimodal model (early fusion), on
 three corpora: talking-head video, held-out video from a different domain, and photos with text. Early
 fusion wins every comparison: Hit@1 0.83 vs 0.65, 0.62 vs 0.21 and 0.93 vs 0.62, each significant under
-an exact paired test. Two predictions we expected to limit the finding did not hold. Removing burned-in
+an exact paired test. No smarter merge closes the gap: across four settings, CombSUM, CombMNZ, CombMAX
+and cross-validated weights all lose to the joint vector, which instead recovers 43–71% of the distance
+between the best merge and an oracle that routes each question to its best signal. Two predictions we expected to limit the finding did not hold. Removing burned-in
 captions did not hurt the joint vector, and pairing each photo with unrelated text hurt late fusion more
 than early fusion (−0.51 vs −0.23 Hit@1), because rank fusion depends on the separate lists agreeing.
 A previously reported gap in exact-moment accuracy between two systems turned out to be a measurement
@@ -71,6 +73,11 @@ or starts within 3 s of it.
 3. On aligned photos, the joint vector beats merged rankings.
 4. On misaligned photos (each photo paired with another photo's title and description), the joint
    vector's advantage disappears.
+5. Score-based merges (CombSUM, CombMNZ, CombMAX, learned weights) beat RRF, but none beats the joint
+   vector significantly on any corpus.
+6. On misaligned photos, CombMAX, which needs no agreement between lists, ties or beats the joint vector.
+7. An oracle that picks each question's best single signal (knowing the answer) beats the joint vector
+   on every corpus.
 
 ## 3. Results
 
@@ -131,6 +138,32 @@ computed over that system's own correct answers, which are different questions. 
 where both found the right scene, scene-first picked the right sentence on 16 of 22 (interviews) and 6 of
 9 (station); routing on 17 of 22 and 6 of 9. No difference.
 
+### 3.6 No smarter merge wins (prediction 5: mostly held; 6: did not hold; 7: held in direction)
+
+Every signal's own index was searched once per question, and the same lists were merged five ways.
+Hit@1, with the joint vector's disputed-question record against each:
+
+| Method | Interviews | Station | Photos | Misaligned photos |
+| --- | --- | --- | --- | --- |
+| **Joint vector** | **0.83** | **0.62** | **0.93** | **0.70** |
+| RRF | 0.55 | 0.11 | 0.62 | 0.11 |
+| CombSUM | 0.70 | 0.24 | 0.78 | 0.46 |
+| CombMNZ | 0.65 | 0.15 | 0.76 | 0.35 |
+| CombMAX | 0.72 | 0.50 | 0.56 | 0.38 |
+| CombSUM, weights by 2-fold CV | 0.70 | 0.50 | 0.72 | 0.46 |
+| *Oracle: best single signal per question* | *0.92* | *0.79* | *0.99* | *0.94* |
+
+The joint vector leads all 20 real comparisons, significantly in 18 (the other two at p = 0.057 and
+0.065, both on the smallest corpus). Score-based merges do beat RRF in 15 of 16 cases, so RRF is a weak
+baseline, but the strongest real merge still trails by 11–24 points. CombMAX, which should thrive when
+lists disagree, doesn't. Learned weights generalize no better than untuned CombSUM.
+
+The oracle is not a method: it chooses each question's best signal after seeing the answer. It bounds
+what any router over single signals could reach. Measured on that scale, starting from the best real
+merge, the joint vector covers 58% (interviews), 43% (station), 71% (photos) and 50% (misaligned photos)
+of the distance to the oracle. What remains is headroom for a router that could tell, per question, which
+signal to trust, which is what adaptive routing attempts, and a direction for future work.
+
 ## 4. Discussion
 
 **Why late fusion loses.** Every question about only one signal (most questions) produces lists that
@@ -141,9 +174,10 @@ disagreement in the first place.
 
 **The boundary.** We set out to map where early fusion stops winning, and the obvious candidate (parts
 that don't describe the same thing) did not produce it. Early fusion degrades with misalignment; late
-fusion with RRF degrades more. Open questions: a smarter merge than RRF (score-based, or learned), a single
-unrelated part rather than two, and signals too large for one multimodal input (long documents), where
-early fusion must compress.
+fusion with RRF degrades more. Five merges, including learned weights, didn't produce it either (§3.6). Open
+questions: a single unrelated part rather than two; signals too large for one multimodal input (long
+documents), where early fusion must compress; and learned rerankers over the union of lists, which are
+closer to routing than to merging.
 
 **Practical rule.** If a record's signals describe the same thing, embed them together. Keep separate
 vectors only to *check* this on your own data: `Collection.evaluate()` in `cinematlas.core` runs exactly
@@ -157,8 +191,8 @@ the comparison in §3.1 on your labelled questions and reports the paired test.
   corpora representative.
 - Questions for the second and third corpora were written by an AI agent. It was blind to the systems,
   but not a human searcher, and it may phrase queries in ways embedding models find easy.
-- Late fusion here means Reciprocal Rank Fusion, what Atlas `$rankFusion` implements and the common
-  default. Other merges were not tested.
+- Late fusion was tested as five merges (RRF, CombSUM, CombMNZ, CombMAX, cross-validated weights) and an
+  oracle. Learned-to-rank models over merged candidates were not tested.
 - The interview corpus tuned the late-fusion weights and routing thresholds; its numbers favour those
   systems, which is why the other two corpora exist.
 - One embedding provider (Voyage AI). Early fusion needs a model that embeds interleaved text and images
@@ -171,7 +205,7 @@ uv run python bench/ingest.py                    # interviews
 uv run python bench/ingest.py --no-captions      # caption ablation
 uv run python bench/ingest.py --station          # station corpus
 uv run python bench/photos.py --ingest           # photos, aligned and misaligned
-uv run python bench/run.py                       # every table here → bench/RESULTS.md
+uv run python bench/run.py                       # every table here → bench/RESULTS.md (incl. bench/fusion.py)
 ```
 
 Full tables: [bench/RESULTS.md](https://github.com/ranfysvalle02/cinematlas/blob/main/bench/RESULTS.md).

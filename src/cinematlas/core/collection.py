@@ -32,6 +32,7 @@ from pymongo.operations import SearchIndexModel
 from ..exceptions import CinematlasError, DependencyError, SearchError
 from ..indexes import definition_drift, wait_until_queryable
 from .evaluate import EvalReport, mcnemar, normalize_questions, score
+from .fusion import MERGES
 from .loaders import Loader
 from .parts import EmbedInput, Joint, Part, as_joint, get_field
 from .results import Hit, Hits
@@ -44,7 +45,6 @@ DEFAULT_DB = "cinematlas"
 DIMENSIONS = 1024
 VECTOR_PATH = "embedding"
 MAX_CANDIDATES = 10_000
-RRF_K = 60
 _SENTENCE = re.compile(r"(?<=[.!?])\s+|\n+")
 
 Progress = Callable[[int, int], None]
@@ -348,11 +348,16 @@ class Collection:
             raise SearchError(f"Vector search failed on {self.index_name!r}: {e}. Did you run .setup()?") from e
 
     def search_merged(self, query: str | Part | Joint | Sequence[str | Part], k: int = 5, *,
-                      where: Mapping[str, Any] | None = None, depth: int = 50) -> Hits:
-        """The usual design, for comparison: search each part's own vector, merge with Reciprocal Rank Fusion.
+                      where: Mapping[str, Any] | None = None, depth: int = 50, fusion: str = "rrf") -> Hits:
+        """The usual design, for comparison: search each part's own vector, then merge the rankings.
 
-        Needs ``late=True``. Each hit's ``ranks`` shows its position in every part's list.
+        ``fusion`` is ``"rrf"`` (Reciprocal Rank Fusion, what Atlas ``$rankFusion`` does), ``"sum"``
+        (normalized scores added; the strongest in bench/), ``"mnz"`` or ``"max"``; see
+        :mod:`cinematlas.core.fusion`. Needs ``late=True``. Each hit's ``ranks`` shows its position in
+        every part's list.
         """
+        if fusion not in MERGES:
+            raise ValueError(f"fusion must be one of {sorted(MERGES)}, got {fusion!r}")
         if not self.late:
             raise CinematlasError("search_merged needs per-part vectors: create the collection with late=True.")
         inputs = _query_inputs(query)
@@ -361,20 +366,25 @@ class Collection:
         vector = self._query_vector(inputs)
         docs: dict[Any, dict[str, Any]] = {}
         ranks: dict[Any, dict[str, int]] = {}
+        lists: dict[str, list[tuple[Any, float]]] = {}
         for i, part in enumerate(self.embed.parts):
-            for rank, row in enumerate(self._vector_search(part_path(i), vector, max(depth, k), where), 1):
+            name = f"{i}:{part!r}"
+            rows = self._vector_search(part_path(i), vector, max(depth, k), where)
+            lists[name] = [(row.get("_key", row.get("_id")), float(row.get("score") or 0)) for row in rows]
+            for rank, row in enumerate(rows, 1):
                 ident = row.get("_key", row.get("_id"))
                 docs.setdefault(ident, row)
-                ranks.setdefault(ident, {})[f"{i}:{part!r}"] = rank
-        fused = sorted(ranks, key=lambda d: -sum(1 / (RRF_K + r) for r in ranks[d].values()))[:k]
-        return Hits([Hit({**docs[d], "score": sum(1 / (RRF_K + r) for r in ranks[d].values()),
-                          "ranks": ranks[d], "rank": n}) for n, d in enumerate(fused, 1)], display=self.display)
+                ranks.setdefault(ident, {})[name] = rank
+        fused = MERGES[fusion](lists)[:k]
+        return Hits([Hit({**docs[d], "ranks": ranks[d], "rank": n}) for n, d in enumerate(fused, 1)],
+                    display=self.display)
 
     def evaluate(self, questions: Sequence[Mapping[str, Any]], k: int = 10, *,
-                 where: Mapping[str, Any] | None = None) -> EvalReport:
+                 where: Mapping[str, Any] | None = None, fusion: str = "rrf") -> EvalReport:
         """Joint vector vs merged per-part rankings on your labelled questions, with a paired test.
 
         Each question is ``{"q": <text, Image(...), or both>, "relevant": <key or list of keys>}``.
+        ``fusion`` picks the merge to compare against (``"sum"`` is the strongest challenger).
         Needs ``late=True``. See :mod:`cinematlas.core.evaluate`.
         """
         items = normalize_questions(questions)
@@ -382,7 +392,7 @@ class Collection:
         joint, merged, rows = [], [], []
         for query, relevant in items:
             j = [ident(h) for h in self.search(query, k, where=where, moment=False)]
-            m = [ident(h) for h in self.search_merged(query, k, where=where)]
+            m = [ident(h) for h in self.search_merged(query, k, where=where, fusion=fusion)]
             joint.append(j)
             merged.append(m)
             rows.append({"q": query if isinstance(query, str) else repr(query), "relevant": sorted(map(str, relevant)),

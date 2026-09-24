@@ -151,75 +151,79 @@ The finding didn't just survive; the gap got wider. On unfamiliar video, merged 
 And the rule settled the default. Ranking by the joint vector tied the router again (14 vs 11, p = 0.69)
 at under half the latency.
 
-## What each part is for now
+## Beyond video
 
-- **The joint vector finds the scene.** That's where the two modalities are fused, and it's the default
-  ranking.
-- **The reranker finds the second.** A scene can run 30 seconds, and the promise is *the second*. The
-  reranker scores only the sentences inside the scenes the vector found, and picks the one that answers.
-- **The router is opt-in.** Here's the honest part: it ties overall, but not everywhere. Ranking by the
-  joint vector is better on questions about what was *shown* (9 vs 0 on the held-out set, p = 0.004). The
-  router leans ahead on what was *said*, in both corpora, though neither gap is significant on its own.
-  If your users mostly ask about speech, `routing="adaptive"` is one argument away.
-
-We could have tuned the default until the speech gap closed. But the held-out set only means something if
-nobody tunes on it, so the default is what the rule we wrote down said it should be.
-
-## Beyond video, and wrong again
-
-The argument never depended on video. So we tested it where it should apply just as well: 394 NASA photos,
-each with a title and a description, and 80 questions written by an AI agent that saw only the photos and
-their text. Half ask about what a photo shows, half about facts in its text. We compared the two designs
-with `evaluate()`, the same check anyone can run on their own collection.
+The argument never depended on video, so we tested it where it should apply just as well: 394 NASA
+photos, each with a title and a description, and 80 questions written by an AI agent that saw only the
+photos and their text. Half ask what a photo shows, half ask about facts in its text. We ran the
+comparison with `evaluate()`, the same check anyone can run on their own collection.
 
 The joint vector scored **0.93**; merged rankings **0.62**. It won 25 of the 26 questions where they
 disagreed.
 
+## Wrong again, twice
+
 Then we tried to find where it stops. The obvious boundary: when a record's parts *don't* describe the
-same thing, cramming them into one vector should blur them, and separate indexes should hold up. So we
-paired every photo with another photo's title and description, and predicted, in writing, that the joint
-vector's advantage would disappear.
+same thing, one vector should blur them and separate indexes should hold up. We paired every photo with
+another photo's title and description and predicted, in writing, that the joint vector's advantage would
+disappear.
 
-It didn't. The joint vector fell to 0.70. Merged rankings fell to **0.11**. Rank fusion rewards records
+It didn't. The joint vector fell to 0.70; merged rankings fell to **0.11**. Rank fusion rewards records
 that rank well in *every* list, so it only works when the lists agree, and misaligned parts are exactly
-when they don't. We were wrong about the boundary; wherever it is, it isn't there.
+when they don't.
 
-One more correction. We'd reported that the router lands on the exact second more often (0.85 vs 0.71).
-Those numbers came from different questions: each system scored on its own correct answers. On the
-questions where both found the right scene, they picked the right second equally often (16 vs 17 of 22,
-and 6 vs 6 of 9). The gap was an artifact of how we measured it.
+Maybe rank fusion was just a weak merge. We tried every alternative we could think of: add the similarity
+scores, reward records that many lists agree on, take each record's single best score (which needs no
+agreement at all), and learn per-signal weights on half the questions to test on the other half. On all
+four collections, every one of them lost to the joint vector, by 11 to 24 points for the best of them.
 
-The full write-up, with every prediction and how it came out, is in
-[paper.md](https://github.com/ranfysvalle02/cinematlas/blob/main/paper.md).
+To see how much room is left, we added an oracle: for each question, whichever single signal ranks the
+answer highest, chosen *knowing the answer*. No real system can do that. The joint vector gets 43–71% of
+the way from the best merge to the oracle without knowing anything about the question. The rest is what a
+perfect router could still add.
+
+## What each part is for
+
+- **The joint vector finds the record.** That's where the signals are fused, and it's the default
+  ranking in both the video search and `cinematlas.core`.
+- **The reranker finds the second.** A scene can run 30 seconds; the promise is *the second*. The
+  reranker scores only the sentences inside the scenes the vector found. (We'd once reported that the
+  router finds the second more often, 0.85 vs 0.71. Those figures came from different questions. On the
+  questions where both found the right scene, they picked the right second equally often: 16 vs 17 of 22,
+  and 6 vs 6 of 9.)
+- **The router is opt-in.** It ties overall but not everywhere: the joint vector is better on questions
+  about what was *shown* (9 vs 0 on the held-out set, p = 0.004), and the router leans ahead on what was
+  *said*, though not significantly. If your users mostly ask about speech, `routing="adaptive"` is one
+  argument away. We could have tuned the default until that gap closed, but a held-out set only means
+  something if nobody tunes on it.
 
 ## The lesson that transfers
 
-This isn't specific to video. Any time you retrieve over more than one signal (text and images, code and
-docs, product titles and photos), you face the same fork:
+Any time you retrieve over more than one signal (text and images, slides and speaker notes, screenshots
+and their text), you face the same fork:
 
-- **Late fusion:** retrieve separately, merge rankings. Each retriever only ever sees half the
-  evidence, and the merge step has to guess how much to trust each half, per query, without the query's
-  help.
+- **Late fusion:** retrieve separately, merge rankings. Each retriever sees half the evidence, and the
+  merge has to guess how much to trust each half, per query, without the query's help.
 - **Early fusion:** embed the signals together, retrieve once. The model sees both halves at once and
   decides, for this item, what matters.
 
 Late fusion is easier to build and easier to explain on a whiteboard. It's also where accuracy goes to
-die, and where teams end up bolting on routers, classifiers and per-query weight tuning to win it back.
+die, and where teams end up bolting on routers, classifiers and per-query weights to win it back.
 
 **If your signals describe the same thing, fuse them in the embedding, not in the ranking.**
 
 ## What we don't know yet
 
-Three corpora, all NASA, 220 questions in total. The paired test tells us which gaps are real; video and
-photos are better than one domain, but lectures, meetings, e-commerce and documents could still behave
-differently. The
-router's per-category lean toward speech is consistent but not yet significant, and more speech-heavy
-data would settle it. Adaptive routing also isn't perfectly repeatable: between two runs it changed its
-answer on one held-out question.
+Three corpora, all NASA, 220 questions. The paired test tells us which gaps are real; it doesn't make
+three corpora representative of lectures, meetings, e-commerce or documents. The router's lean toward
+speech questions is consistent but not yet significant. Adaptive routing isn't perfectly repeatable:
+between two runs it changed its answer on one held-out question. And we still haven't found where late
+fusion wins, if anywhere.
 
-Everything here reproduces from the repo. Both corpora, the caption ablation and the limits are in
-[bench/RESULTS.md](https://github.com/ranfysvalle02/cinematlas/blob/main/bench/RESULTS.md). If you run
-it on your own video and it breaks, we want to know.
+The write-up, with seven predictions made in advance and how each came out, is
+[paper.md](https://github.com/ranfysvalle02/cinematlas/blob/main/paper.md); every table is in
+[bench/RESULTS.md](https://github.com/ranfysvalle02/cinematlas/blob/main/bench/RESULTS.md). If it breaks
+on your data, `evaluate()` will tell you, and we want to know.
 
 ---
 

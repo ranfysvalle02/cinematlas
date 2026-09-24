@@ -20,41 +20,34 @@ cinematlas search "how loud is a sonic boom?"
 
 ## The finding: fuse in the embedding, not in the ranking
 
-Video search has two kinds of question. *"How many medals has his beer won?"* is about what was **said**.
-*"The one with the girl on hay bales"* is about what was **shown**.
-
-The standard design indexes speech and pictures separately, retrieves from each, and merges the ranked
-lists. That fails, because the lists disagree on every question that's about only one of the two, and
-merging averages the disagreement away. Cinematlas embeds each scene's keyframe **and** its transcript
-into **one** vector, so there's nothing to reconcile.
+A record usually carries several signals about the same thing: a scene's picture and speech, a photo and
+its caption. The standard design gives each signal its own index and merges the ranked lists afterwards.
+That loses: on any question about only one signal, the lists disagree, and merging averages the right
+answer away. Cinematlas embeds a record's signals **together, into one vector**, so there's nothing to
+reconcile.
 
 | Hit@1 | Video | Held-out video | Photos |
 | --- | --- | --- | --- |
-| merged rankings (one index per signal, rank fusion) | 0.65 | 0.21 | 0.62 |
+| merged rankings (rank fusion; on video also tuned weights + reranker) | 0.65 | 0.21 | 0.62 |
+| best of five merges, incl. learned weights | 0.72 | 0.50 | 0.78 |
 | **one joint vector per record** | **0.83** | **0.62** | **0.93** |
-| questions where exactly one wins (joint vs merged) | 14 vs 3, p = 0.013 | 40 vs 7, p < 0.001 | 25 vs 1, p < 0.001 |
+| joint vs merged, questions only one got right | 14 vs 3, p = 0.013 | 40 vs 7, p < 0.001 | 25 vs 1, p < 0.001 |
 
-**It holds on data we never tuned on.** The held-out video is a different domain (a silent station tour,
-astronaut Q&A, science demos; 386 scenes, no burned-in captions), and the photos (394 NASA photos with
-titles and descriptions) aren't video at all. Their 160 questions were written by an AI agent that saw
-only the media, never the code or results.
+- **On data nobody tuned on.** The held-out video (a different domain, no burned-in captions) and the
+  photos (not video at all) have 160 questions written by an AI agent that never saw the code or results.
+- **Not by reading subtitles.** Cropping burned-in captions hurt keyframes alone (0.53 → 0.40 on speech),
+  not the joint vector (0.73 → 0.77).
+- **Even when the parts disagree.** Pair each photo with another photo's text: the joint vector drops to
+  0.70, merged rankings to 0.11. We predicted the reverse.
+- **Close to the ceiling.** An oracle that sends each question to its best signal, knowing the answer,
+  bounds what routing could reach. The joint vector covers 43–71% of the distance from the best merge to it.
 
-**It isn't reading subtitles.** On the first corpus, where every frame has burned-in captions, cropping
-them made keyframes alone worse on speech (0.53 → 0.40) but left the joint vector intact (0.73 → 0.77).
+**So `search()` ranks with the joint vector** and uses a reranker only to pick the exact second. Adaptive
+routing, built to rescue merged rankings, ties it at twice the latency. It leans ahead on questions about
+what was said and behind on what was shown; pass `routing="adaptive"` if your users mostly ask about speech.
 
-**So the default ranks with that one vector.** `search()` finds scenes with the joint vector and uses a
-sentence reranker only to pick the exact second. The router we built to rescue merged rankings ties it on
-both corpora (p = 1.0 and p = 0.69) at about twice the latency, so it's now opt-in. The two do differ: the
-default is better on questions about what was shown; routing leans ahead on what was said. Both find
-the exact second equally well once they have the right scene. If your users mostly ask about speech,
-pass `routing="adaptive"`.
-
-**It holds even when it shouldn't.** Pair each photo with *another* photo's text and early fusion does
-degrade (0.93 → 0.70), but merged rankings collapse (0.62 → 0.11): rank fusion needs a record's lists to
-agree. We predicted the opposite.
-
-[The paper: methods, predictions and limits](https://github.com/ranfysvalle02/cinematlas/blob/main/paper.md) · [full results](https://github.com/ranfysvalle02/cinematlas/blob/main/bench/RESULTS.md) ·
-[the story](https://github.com/ranfysvalle02/cinematlas/blob/main/blog.md).
+[Paper: methods, seven predictions, limits](https://github.com/ranfysvalle02/cinematlas/blob/main/paper.md) · [every table](https://github.com/ranfysvalle02/cinematlas/blob/main/bench/RESULTS.md) ·
+[the story](https://github.com/ranfysvalle02/cinematlas/blob/main/blog.md)
 
 ---
 
@@ -132,9 +125,9 @@ shots.add(Screenshots("qa-run-42/"))
 shots.search("the screen with the red error banner").top.text  # 'Payment failed: card declined'
 ```
 
-**Check it on your own data.** Every vector library says its approach wins. Create the collection with
-`late=True` (it also stores one vector per part), label 30–50 questions, and `evaluate()` runs the joint
-vector against merged per-part rankings with the same paired test as the benchmarks:
+**Check it on your own data.** Every vector library says its approach wins; this one lets you check.
+Create the collection with `late=True` (it also stores one vector per part), label 30–50 questions, and
+`evaluate()` runs the joint vector against merged per-part rankings with the same paired test:
 
 ```python
 photos = atlas.collection("photos", embed=Text("title") + Image("image"), key="id", late=True)
@@ -148,6 +141,9 @@ merged rankings    0.62    0.90   0.71
 
 The joint vector wins on your data: joint 0.93 vs merged 0.62 Hit@1 on 80 questions (25 vs 1 disputed, p = < 0.001).
 ```
+
+The default challenger is Reciprocal Rank Fusion (what Atlas `$rankFusion` does); `fusion="sum"` tests
+against the strongest merge we found.
 
 **Extend it.** A part is anything that turns a record into text or images for the vector; a loader is
 anything that yields records:
@@ -252,7 +248,8 @@ Global options: `--uri`, `--db`, `--collection`, `--transcript-mode`, `-v`.
 
 Atlas Vector Search for the joint vectors, `$rerank` (8.3+) for in-database sentence reranking,
 `$rankFusion` (8.0+) for adaptive routing's one-query fusion, Automated Embedding for transcripts,
-Atlas Search for BM25, scalar quantization and BSON float32 vectors. Each has an equivalent fallback, and `cinematlas doctor` tells you which path is in use.
+Atlas Search for BM25, scalar quantization and BSON float32 vectors. Each has an equivalent fallback, and
+`cinematlas doctor` tells you which path is in use.
 
 ## Development
 
@@ -261,10 +258,11 @@ uv sync
 uv run pytest -m "not integration and not media"    # unit, offline (~9 s)
 uv run pytest -m media                               # real ffmpeg / Whisper on a committed NASA fixture
 uv run pytest -m integration                         # live Atlas + Docker Atlas Local (reads .env)
-uv run python bench/ingest.py                        # the benchmark corpora, once:
-uv run python bench/ingest.py --no-captions          #   caption ablation
-uv run python bench/ingest.py --station              #   held-out corpus
-uv run python bench/run.py                           # both corpora, caption ablation, paired tests
+uv run python bench/ingest.py                        # benchmark corpora, once: interviews,
+uv run python bench/ingest.py --no-captions          #   caption ablation,
+uv run python bench/ingest.py --station              #   held-out video,
+uv run python bench/photos.py --ingest               #   photos (aligned and misaligned)
+uv run python bench/run.py                           # every table and paired test → bench/RESULTS.md
 ```
 
 MIT license. Test and benchmark media: NASA, public domain.

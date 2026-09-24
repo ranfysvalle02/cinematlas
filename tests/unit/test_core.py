@@ -502,3 +502,28 @@ def test_screenshots_without_ocr_embed_the_image_alone(tmp_path):
     (tmp_path / "a.png").write_bytes(png())
     (record,) = list(Screenshots(tmp_path, ocr=False))
     assert record["text"] is None and len(Screenshots.embed.inputs(record)) == 1
+
+
+# ------------------------------------------------------------------ merges (late fusion) for comparison
+def test_merges_disagree_on_how_to_combine_lists():
+    from cinematlas.core.fusion import comb_max, comb_mnz, comb_sum, rrf
+
+    lists = {"title": [("a", 0.9), ("b", 0.5), ("c", 0.1)], "text": [("c", 0.9), ("b", 0.5), ("a", 0.1)],
+             "photo": [("d", 0.9), ("b", 0.5), ("e", 0.1)]}
+    assert rrf(lists)[0] == "b"  # second everywhere beats first once
+    assert comb_sum(lists)[0] == "b" and comb_mnz(lists)[0] == "b"
+    assert comb_max(lists)[0] in ("a", "c", "d")  # one best score wins; no agreement needed
+    assert comb_sum(lists, {"title": 1, "text": 0, "photo": 0})[0] == "a"
+
+
+def test_merged_search_and_evaluate_accept_a_fusion_choice(voyage):
+    mongo = PathMongo({"embedding": [{"_key": "x", "score": 0.9}],
+                       "embedding_part0": [{"_key": "x", "score": 0.9}, {"_key": "y", "score": 0.1}],
+                       "embedding_part1": [{"_key": "y", "score": 0.8}, {"_key": "x", "score": 0.7}]})
+    coll = Atlas(mongo_client=Client(mongo), voyage_client=voyage).collection(
+        "photos", embed=Text("title") + Image("image"), key="id", late=True)
+    top = coll.search_merged("q", k=2, fusion="sum")[0]
+    assert top["_key"] == "x" and "merged #1" in top.explain() and "0:Text('title') #1" in top.explain()
+    assert coll.evaluate([{"q": "q", "relevant": "x"}], fusion="max").merged.hit1 == 1.0
+    with pytest.raises(ValueError, match="fusion must be one of"):
+        coll.search_merged("q", fusion="magic")

@@ -20,7 +20,10 @@ class Hit(dict):
         return ((self.get("moment") or {}).get("text") or "").strip()
 
     def explain(self) -> str:
-        parts = [f"vector #{self['rank']} (score {self['score']:.3f})"]
+        if self.get("ranks"):  # a merged result: its position in each part's list
+            parts = [f"merged #{self['rank']}", *(f"{name} #{r}" for name, r in self["ranks"].items())]
+        else:
+            parts = [f"vector #{self['rank']} (score {self.get('score', 0):.3f})"]
         if self.get("moment"):
             parts.append(f"best sentence relevance {self['moment']['relevance']:.2f}")
         return ", ".join(parts)
@@ -28,7 +31,7 @@ class Hit(dict):
     def __repr__(self) -> str:
         label = self.get("_key") or self.get("_id")
         snippet = (self.text[:60] + "…") if len(self.text) > 60 else self.text
-        return f"<Hit {label} score={self.get('score', 0):.3f} {snippet!r}>"
+        return f"<Hit {label} rank={self.get('rank')} {snippet!r}>"
 
 
 class Hits(list):
@@ -61,7 +64,8 @@ class Hits(list):
             return "(no results)"
         lines = []
         for i, h in enumerate(self, 1):
-            lines.append(f"{i:>2}. {self._label(h)[:70]}  ({h.get('score', 0):.3f})")
+            score = f"  ({h['score']:.3f})" if isinstance(h.get("score"), float) else ""
+            lines.append(f"{i:>2}. {self._label(h)[:70]}{score}")
             if h.text:
                 lines.append(f"    “{h.text[:100]}”")
         return "\n".join(lines)

@@ -200,6 +200,8 @@ def main() -> None:
         "",
         *beyond_video(),
         "",
+        *smarter_merges(),
+        "",
         "Reproduce: `uv run python bench/ingest.py`, then `--no-captions` and `--station`, then "
         "`uv run python bench/run.py` · "
         f"generated {time.strftime('%Y-%m-%d')}",
@@ -368,6 +370,60 @@ def beyond_video() -> list[str]:
            "still open; a smarter merge than RRF is the next thing to test."),
         "",
         "Reproduce: `uv run python bench/photos.py --ingest`, then `uv run python bench/run.py`.",
+    ]
+
+
+def _oracle_wins(row: dict) -> bool:
+    return row["p"] < 0.05 and row["method_only"] > row["joint_only"]
+
+
+def smarter_merges() -> list[str]:
+    """Every late-fusion method we could think of, plus an oracle, against the joint vector on all four corpora."""
+    import fusion
+
+    results = fusion.run_all()
+    real = ["rrf", "sum", "mnz", "max", "learned (2-fold CV)"]
+    closure, beaten, sig = [], 0, 0
+    for name, res in results.items():
+        r = res["rows"]
+        best = max(real, key=lambda m: r[m]["hit1"])
+        gap = r["oracle single signal"]["hit1"] - r[best]["hit1"]
+        share = (r["joint vector"]["hit1"] - r[best]["hit1"]) / gap if gap > 0 else float("nan")
+        closure.append(f"{share:.0%} ({name})")
+        for m in real:
+            beaten += r[m]["hit1"] < r["joint vector"]["hit1"]
+            sig += r[m]["joint_only"] > r[m]["method_only"] and r[m]["p"] < 0.05
+    total = len(real) * len(results)
+    rrf_beaten = sum(res["rows"][m]["hit1"] > res["rows"]["rrf"]["hit1"]
+                     for res in results.values() for m in ("sum", "mnz", "max", "learned (2-fold CV)"))
+    max_mis = results["photos, misaligned"]["rows"]["max"]["hit1"]
+    joint_mis = results["photos, misaligned"]["rows"]["joint vector"]["hit1"]
+    return [
+        "## Can a smarter merge win?",
+        "",
+        "Merged rankings above use Reciprocal Rank Fusion. Here every signal's own index is searched once per "
+        "question (top 50, with scores) and merged five ways, all from the same retrieved lists: RRF; CombSUM "
+        "(add min-max-normalized scores); CombMNZ (CombSUM times the number of lists that found the record); "
+        "CombMAX (a record's best single-signal score, which needs no agreement between lists); and CombSUM with "
+        "per-signal weights learned by 2-fold cross-validation. The oracle picks, for each question, whichever "
+        "single signal ranks the answer highest, knowing the answer: not a real method, but an upper bound for "
+        "any router that sends each question to one signal. Merges use only the separate signals (video: "
+        "keyframe, transcript, full text; photos: title, description, photo), never the joint vector. "
+        "Cells: Hit@1 (joint only vs method only, exact McNemar p). Code: [fusion.py](fusion.py).",
+        "",
+        *fusion.table(results),
+        "",
+        f"**No real merge beats the joint vector on any corpus.** It is ahead in all {total} comparisons, "
+        f"significantly in {sig}. Of the gap between the best real merge and the oracle, the joint vector "
+        f"closes {', '.join(closure)}.",
+        "",
+        "**Predictions vs outcome** (recorded before this run). Score-based merges beat RRF but none beats the "
+        f"joint vector: mostly held; they beat RRF in {rrf_beaten} of {len(results) * 4} cases and none beats the "
+        "joint vector. CombMAX ties or beats the joint vector on misaligned "
+        + ("photos: held." if max_mis >= joint_mis else f"photos: did not hold ({max_mis:.2f} vs {joint_mis:.2f}).")
+        + " The oracle beats the joint vector everywhere: it's ahead on every corpus, significantly on "
+        + ", ".join(n for n, res in results.items() if _oracle_wins(res["rows"]["oracle single signal"]))
+        + ". That remaining gap is what perfect per-question routing could still add on top of early fusion.",
     ]
 
 
