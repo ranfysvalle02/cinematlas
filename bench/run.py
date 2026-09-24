@@ -447,6 +447,50 @@ def boundary_section() -> list[str]:
         "passage is a small share of it, and the long text also drowns out the photo (the joint vector's visual "
         "accuracy falls with length though the photo never changes)."
         + fusion_verdict,
+        "",
+        *chunker_lines(),
+    ]
+
+
+def chunker_lines() -> list[str]:
+    """Real chunkers vs the ideal boundaries, through the public API (bench/boundary.py CHUNKERS)."""
+    import boundary
+
+    from cinematlas.core import Atlas
+
+    with Atlas() as atlas:
+        res = boundary.evaluate_chunkers(atlas)
+    if not res:
+        return []
+    rows = [f"| {name} | {r['length']} | {r['chunks']} | {r['hit1']:.2f} ({r['by_kind']['visual']:.2f} / "
+            f"{r['by_kind']['text']:.2f}) | {r['ideal']:.2f} | {r['vs_ideal'][0]} vs {r['vs_ideal'][1]}, "
+            f"p {fmt_p(r['vs_ideal'][2])} |" for name, r in res.items()]
+    semantic = next((r for n, r in res.items() if "Semantic" in n), None)
+    fixed = [r for n, r in res.items() if n.startswith("unmarked, fixed")]
+    verdicts = []
+    if semantic and fixed:
+        held = semantic["hit1"] >= 0.88 and all(semantic["hit1"] > f["hit1"] for f in fixed)
+        fixed_scores = ", ".join(f"{f['hit1']:.2f}" for f in fixed)
+        verdicts.append("With paragraph breaks removed, the semantic chunker beats fixed-size chunking and gets "
+                        f"within 0.05 of the ideal (>= 0.88): {'held' if held else 'did not hold'} "
+                        f"({semantic['hit1']:.2f}; fixed-size {fixed_scores}). Directly against fixed-size chunking "
+                        "its lead is not significant at this size ("
+                        + "; ".join("{} vs {}, p {}".format(*mcnemar(semantic["correct"], f["correct"])[:2],
+                                                            fmt_p(mcnemar(semantic["correct"], f["correct"])[2]))
+                                    for f in fixed)
+                        + "); every real chunker keeps chunk-level fusion far above one vector per record.")
+    return [
+        "**Real chunkers.** Chunk-level fusion through `cinematlas.core`, with the chunkers users get. \"Unmarked\" "
+        "removes the paragraph breaks, so a chunker has to find topic boundaries itself (with them present, "
+        "`Paragraphs` gets the ideal boundaries by construction). The semantic chunker's rule and defaults were "
+        "chosen on documents built only from the distractor pool, which no question targets. Ideal: chunk-level "
+        "fusion with one description per chunk, at the same length.",
+        "",
+        "| Chunker | Descriptions per record | Chunks stored | Hit@1 (visual / text) | Ideal | vs ideal |",
+        "| --- | --- | --- | --- | --- | --- |",
+        *rows,
+        "",
+        "**Predictions vs outcome** (recorded before these runs). " + " ".join(verdicts),
     ]
 
 

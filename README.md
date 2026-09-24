@@ -44,13 +44,14 @@ Embed the photo together with *each chunk* instead:
 | one joint vector per record | 0.54 |
 | chunked late fusion (ideal chunk boundaries) | 0.81 |
 | **the photo fused into each chunk** (ideal boundaries) | **0.94** |
-| the same with the library's own chunker, `Text("body", chunk=1600)` | 0.74 |
+Ideal boundaries aren't needed. Strip the paragraph breaks so a chunker has to find the topics itself,
+and `Semantic` (cut where adjacent sentences stop being similar) scores **0.90 against 0.93** for ideal
+boundaries, statistically indistinguishable; fixed-size chunks score 0.82–0.85 and one vector per record
+0.59 (8 descriptions per record).
 
-Chunk boundaries matter: the real chunker beats one vector per record (24 vs 8, p = 0.007) and ties
-late fusion's ideal chunks, but 1,600-character chunks often hold two passages, diluting the answer.
-
-Both come with paired significance tests and ten predictions written down before each run, four of
-which failed. [Paper](https://github.com/ranfysvalle02/cinematlas/blob/main/paper.md) · [every table](https://github.com/ranfysvalle02/cinematlas/blob/main/bench/RESULTS.md) · [the story](https://github.com/ranfysvalle02/cinematlas/blob/main/blog.md)
+Both come with paired significance tests and eleven predictions written down before each run, four of
+which failed. [Paper](https://github.com/ranfysvalle02/cinematlas/blob/main/paper.md) · [every table](https://github.com/ranfysvalle02/cinematlas/blob/main/bench/RESULTS.md) · [the story](https://github.com/ranfysvalle02/cinematlas/blob/main/blog.md) ·
+[review](https://github.com/ranfysvalle02/cinematlas/blob/main/REVIEW.md)
 
 **In the library:** video `search()` ranks scenes with the joint vector and uses a reranker only to pick
 the exact second (`routing="adaptive"` leans ahead on speech questions, at twice the latency).
@@ -111,9 +112,10 @@ photos.search(Image("mars.jpg"), where={"center": "JPL"})           # query by p
 
 That output is real: [`examples/photos.py`](https://github.com/ranfysvalle02/cinematlas/blob/main/examples/photos.py) indexes about 200 NASA photos and runs it.
 
-**Long text? Chunk it, fused.** `Text("body", chunk=800)` splits long text into pieces of up to that many
-characters and embeds each piece *together with the record's other parts*; search keeps each record's best
-piece and returns it as the moment. Smaller chunks, closer to one idea each, did better in our tests:
+**Long text? Chunk it, fused.** `Text("body", chunk=800)` splits long text into its paragraphs (up to 800
+characters each) and embeds each piece *together with the record's other parts*; search keeps each
+record's best piece and returns it as the moment. For text without paragraphs (transcripts, OCR, scraped
+pages) use `chunk=Semantic(800)`, which cuts where the topic changes:
 
 ```python
 manuals = atlas.collection("manuals", embed=Text("title") + Text("body", chunk=800) + Image("cover"),
@@ -270,6 +272,20 @@ Atlas Search for BM25, scalar quantization and BSON float32 vectors. Each has an
 `cinematlas doctor` tells you which path is in use.
 
 ## Development
+
+```
+cinematlas/
+  engine.py        Cinematlas: the facade (configuration + public API)
+  media.py         download, uploads, audio, scene cuts, keyframes, S3
+  urlsafety.py     remote URLs are untrusted input (SSRF guard)
+  transcribe.py    speech to timestamped sentences (OpenAI Whisper or faster-whisper)
+  embed.py         keyframe, joint, transcript and query vectors
+  ingest.py        the pipeline and its gapless replace
+  search.py        single sources, fusion, reranking, routing
+  capabilities.py  native-stage fallbacks and routing calibration
+  doctor.py        what's wrong and how to fix it
+  core/            joint-vector search for any records: parts, chunkers, loaders, evaluate()
+```
 
 ```bash
 uv sync

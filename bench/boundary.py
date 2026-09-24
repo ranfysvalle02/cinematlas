@@ -27,7 +27,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent))
 import photos  # noqa: E402
 
-from cinematlas.core import Atlas, Image, Text, mcnemar  # noqa: E402
+from cinematlas.core import Atlas, Image, Paragraphs, Semantic, Text, mcnemar  # noqa: E402
 from cinematlas.core.collection import _query_inputs, part_path  # noqa: E402
 from cinematlas.core.fusion import comb_sum, rrf  # noqa: E402
 
@@ -107,18 +107,56 @@ def ingest_chunk_fusion(lengths=(8, 32)) -> None:
             coll.wait_until_searchable(timeout_s=900)
 
 
-def library_collection(atlas: Atlas):
-    """The same idea through the public API, with the library's own chunker (not ideal boundaries)."""
-    return atlas.collection(f"{DB}.long32_library", embed=Text("body", chunk=1600) + Image("image"),
+# Chunkers, through the public API. "unmarked" strips paragraph breaks, so a chunker has to find topic
+# boundaries itself (with them present, a paragraph chunker gets the ideal boundaries by construction).
+CHUNKERS = {
+    "unmarked, fixed 1600 chars": (8, False, lambda: Paragraphs(1600)),
+    "unmarked, fixed 500 chars": (8, False, lambda: Paragraphs(500)),
+    "unmarked, Semantic(800)": (8, False, lambda: Semantic(800)),
+}
+
+
+def chunker_records(length: int, marked: bool) -> list[dict]:
+    records = b2_records(length)[0]
+    return records if marked else [{**r, "body": r["body"].replace("\n\n", " ")} for r in records]
+
+
+def chunker_collection(atlas: Atlas, name: str):
+    length, _, make = CHUNKERS[name]
+    slug = "".join(c if c.isalnum() else "_" for c in name.lower()).strip("_")[:40]
+    return atlas.collection(f"{DB}.chunker_{slug}", embed=Text("body", chunk=make()) + Image("image"),
                             key="nasa_id")
 
 
-def ingest_library() -> None:
+def ingest_chunkers(names=None) -> None:
     with Atlas() as atlas:
-        coll = library_collection(atlas).setup(timeout_s=900)
-        print(coll, coll.add(b2_records(32)[0], batch_size=32,
-                             progress=lambda s, a: print(f"\r  {s}", end="", flush=True)))
-        coll.wait_until_searchable(timeout_s=900)
+        for name in names or CHUNKERS:
+            length, marked, _ = CHUNKERS[name]
+            coll = chunker_collection(atlas, name).setup(timeout_s=900)
+            print(name, coll.add(chunker_records(length, marked), batch_size=32,
+                                 progress=lambda s, a: print(f"\r  {s}", end="", flush=True)), flush=True)
+            coll.wait_until_searchable(timeout_s=900)
+
+
+def evaluate_chunkers(atlas: Atlas) -> dict:
+    """Hit@1 per chunker, plus each one's paired test against the ideal-boundary result at the same length."""
+    qs, out = photos.questions(False), {}
+    for name, (length, _, _) in CHUNKERS.items():
+        coll = chunker_collection(atlas, name)
+        if not coll.count():
+            continue
+        ideal = chunk_fusion_collection(atlas, length)
+        hits, ref = [], []
+        for q in qs:
+            rel = set(q["relevant"])
+            hits.append(top1([h["_key"] for h in coll.search(q["q"], k=5, moment=False)], rel))
+            ref.append(top1(best_chunk(ideal, ideal._query_vector(_query_inputs(q["q"])), DEPTH), rel))
+        by_kind = {k: sum(h for h, q in zip(hits, qs, strict=True) if q["kind"] == k) / 40 for k in ("visual", "text")}
+        out[name] = {"length": length, "hit1": sum(hits) / len(hits), "by_kind": by_kind,
+                     "ideal": sum(ref) / len(ref), "vs_ideal": mcnemar(hits, ref),
+                     "chunks": coll.mongo.count_documents({}), "correct": hits}
+        print(name, out[name])
+    return out
 
 
 def best_chunk(coll, vec, depth: int) -> list:
@@ -192,9 +230,6 @@ def evaluate_b2(atlas: Atlas) -> list[dict]:
         fused = chunk_fusion_collection(atlas, length)
         if length > 1 and fused.count():
             correct["chunk-level joint"] = []
-        library = library_collection(atlas)
-        if length == 32 and library.count():
-            correct["Text(chunk=1600), the library"] = []
         for q in qs:
             vec = joint._query_vector(_query_inputs(q["q"]))
             image = [(r["_key"], r["score"]) for r in joint._vector_search(part_path(1), vec, DEPTH, None)]
@@ -211,9 +246,6 @@ def evaluate_b2(atlas: Atlas) -> list[dict]:
             correct["unchunked late (sum)"].append(top1(comb_sum({"image": image, "text": whole}), rel))
             if "chunk-level joint" in correct:
                 correct["chunk-level joint"].append(top1(best_chunk(fused, vec, DEPTH), rel))
-            if "Text(chunk=1600), the library" in correct:
-                found = [h["_key"] for h in library.search(q["q"], k=5, moment=False)]
-                correct["Text(chunk=1600), the library"].append(top1(found, rel))
         rows.append(_row(f"long text, {length} description{'s' if length > 1 else ''}", qs, correct))
     return rows
 
@@ -232,14 +264,18 @@ if __name__ == "__main__":
     ap.add_argument("--build", action="store_true")
     ap.add_argument("--ingest", action="store_true")
     ap.add_argument("--ingest-chunk-fusion", type=int, nargs="*", help="lengths, e.g. 8 32")
-    ap.add_argument("--ingest-library", action="store_true", help="32 descriptions via Text(chunk=1600)")
+    ap.add_argument("--ingest-chunkers", action="store_true", help="the chunker comparison")
+    ap.add_argument("--chunkers", action="store_true", help="evaluate only the chunker comparison")
     args = ap.parse_args()
     if args.build:
         build()
     elif args.ingest:
         ingest()
-    elif args.ingest_library:
-        ingest_library()
+    elif args.ingest_chunkers:
+        ingest_chunkers()
+    elif args.chunkers:
+        with Atlas() as atlas:
+            evaluate_chunkers(atlas)
     elif args.ingest_chunk_fusion is not None:
         ingest_chunk_fusion(tuple(args.ingest_chunk_fusion) or (8, 32))
     else:

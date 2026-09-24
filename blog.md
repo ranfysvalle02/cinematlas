@@ -181,10 +181,11 @@ good as with no padding at all, and the picture questions came back to 0.90. The
 
 **Fuse within a unit, chunk across units.**
 
-In the library it's one argument, `Text("body", chunk=…)`, with one caveat we measured: those 0.94 used
-ideal chunk boundaries, one description per chunk. The library's own chunker at 1,600 characters often
-packs two descriptions together and scores 0.74: still well above one vector per record (24 vs 8
-disputed), level with late fusion's ideal chunks, and short of the ideal. Where you cut matters.
+Those 0.94 used ideal boundaries, one description per chunk. Real text doesn't come pre-cut, so we
+removed the paragraph breaks and let chunkers find the topics themselves. A semantic chunker (cut where
+adjacent sentences stop being similar) scored 0.90, statistically indistinguishable from ideal. In the
+library it's one argument: `Text("body", chunk=800)` for text with paragraphs, `chunk=Semantic(800)` for
+text without.
 
 ## What each part is for
 
@@ -217,11 +218,10 @@ them is long, chunk it, and fuse each chunk.**
 Three corpora, all NASA, 220 questions. The paired test tells us which gaps are real; it doesn't make
 three corpora representative of lectures, meetings, e-commerce or documents. The router's lean toward
 speech questions is consistent but not yet significant. Adaptive routing isn't perfectly repeatable:
-between two runs it changed its answer on one held-out question. The long records we tested were built by padding real
-descriptions, not real long documents, and our chunk boundaries were ideal; a real chunker will sometimes
-cut the answer in half.
+between two runs it changed its answer on one held-out question. The long records we tested were built by
+padding real descriptions, not real long documents with their own structure.
 
-The write-up, with ten predictions made in advance and how each came out, is
+The write-up, with eleven predictions made in advance and how each came out, is
 [paper.md](https://github.com/ranfysvalle02/cinematlas/blob/main/paper.md); every table is in
 [bench/RESULTS.md](https://github.com/ranfysvalle02/cinematlas/blob/main/bench/RESULTS.md). If it breaks
 on your data, `evaluate()` will tell you, and we want to know.

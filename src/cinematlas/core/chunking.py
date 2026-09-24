@@ -1,7 +1,7 @@
 """Chunkers: where to cut a long text so each piece stays about one thing.
 
-A chunk that holds two topics dilutes both, and chunk-level fusion only works when chunks are clean
-(bench/: 0.94 Hit@1 with one description per chunk, 0.74 when a 1,600-character packer merged two).
+A chunk that holds two topics dilutes both. On bench/ records with no paragraph breaks, ``Semantic``
+scored 0.90 Hit@1 against 0.93 for ideal boundaries; fixed-size chunks 0.82–0.85; no chunking 0.59.
 
 * ``Paragraphs(max_chars)``  default. Paragraphs are the author's own topic boundaries: never merge two
                              unless one is tiny; split an over-long one at sentence boundaries.

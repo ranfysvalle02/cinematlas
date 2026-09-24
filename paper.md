@@ -1,6 +1,6 @@
 # Fuse in the embedding, not in the ranking
 
-**Early vs late fusion for multimodal retrieval: three corpora, ten pre-stated predictions, one boundary**
+**Early vs late fusion for multimodal retrieval: three corpora, eleven pre-stated predictions, one boundary**
 
 *Cinematlas project · September 2026 · all code, corpora, questions and results:
 [github.com/ranfysvalle02/cinematlas](https://github.com/ranfysvalle02/cinematlas)*
@@ -87,6 +87,8 @@ or starts within 3 s of it.
    vector significantly.
 10. *Recorded after 8–9:* early fusion at chunk granularity beats chunked late fusion on long records and
     recovers visual accuracy to ≥ 0.80.
+11. With paragraph breaks removed, a semantic chunker beats fixed-size chunking and comes within 0.05 of
+    ideal boundaries.
 
 ## 3. Results
 
@@ -207,11 +209,23 @@ chunk.
 It matches the unpadded joint vector at both lengths, beats chunked late fusion (11 vs 3, p = 0.057 at 8;
 12 vs 2, p = 0.013 at 32) and restores visual accuracy to 0.88–0.90. The padding costs it nothing: the
 right record's best chunk is its own description with its photo, the same input as the unpadded record.
-Both chunked methods here used ideal boundaries. Through the library's own chunker, `Text(field,
-chunk=1600)` (paragraphs packed up to 1,600 characters, often two descriptions per chunk), the same
-records score 0.74 (0.78 / 0.70): significantly above one vector per record (24 vs 8, p = 0.007), level
-with chunked late fusion's ideal chunks (9 vs 15, p = 0.31), and below ideal chunk-level fusion (1 vs 17,
-p < 0.001). Chunk boundaries are the next lever.
+### 3.9 Real chunkers find the boundaries (prediction 11: held)
+
+Both chunked methods above used ideal boundaries. To test real chunkers without handing them the answer,
+the paragraph breaks were removed (8 descriptions per record), so a chunker must find topic boundaries on
+its own. `Semantic` embeds each sentence and cuts wherever the similarity between adjacent two-sentence
+windows falls below the text's mean; its rule and defaults were chosen on documents built only from the
+distractor pool, which no question targets.
+
+| Chunker, no paragraph breaks | Hit@1 (visual / text) | vs ideal boundaries (0.93) |
+| --- | --- | --- |
+| Fixed-size, 1,600 characters | 0.82 (0.80 / 0.85) | 3 vs 11, p = 0.057 |
+| Fixed-size, 500 characters | 0.85 (0.80 / 0.90) | 3 vs 9, p = 0.15 |
+| **Semantic, 800 characters** | **0.90** (0.88 / 0.93) | 3 vs 5, p = 0.73 |
+
+Every real chunker keeps chunk-level fusion far above one vector per record (0.59 at this length).
+The semantic chunker is statistically indistinguishable from ideal boundaries; its lead over fixed-size
+chunking (10 vs 4 and 6 vs 2) is not significant at 80 questions.
 
 ## 4. Discussion
 
