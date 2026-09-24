@@ -1,6 +1,6 @@
 # Fuse in the embedding, not in the ranking
 
-**Early vs late fusion for multimodal retrieval: three corpora, eleven pre-stated predictions, one boundary**
+**Early vs late fusion for multimodal retrieval: four corpora, twelve pre-stated predictions, one boundary**
 
 *Cinematlas project · September 2026 · all code, corpora, questions and results:
 [github.com/ranfysvalle02/cinematlas](https://github.com/ranfysvalle02/cinematlas)*
@@ -12,11 +12,12 @@
 Multimodal retrieval systems usually index each signal separately (transcript, keyframe, title, photo)
 and merge the ranked lists, typically with Reciprocal Rank Fusion (late fusion). We compare this with
 embedding each record's signals together into one vector with a multimodal model (early fusion), on
-three corpora: talking-head video, held-out video from a different domain, and photos with text. Early
-fusion wins every comparison: Hit@1 0.83 vs 0.65, 0.62 vs 0.21 and 0.93 vs 0.62, each significant under
-an exact paired test. No smarter merge closes the gap: across four settings, CombSUM, CombMNZ, CombMAX
-and cross-validated weights all lose to the joint vector, which instead recovers 43–71% of the distance
-between the best merge and an oracle that routes each question to its best signal. Two predictions we expected to limit the finding did not hold. Removing burned-in
+four corpora: talking-head video, held-out video from a different domain, NASA photos with text, and
+museum artworks. Early fusion wins every comparison: Hit@1 0.83 vs 0.65, 0.62 vs 0.21, 0.93 vs 0.62 and
+0.95 vs 0.62, each significant under an exact paired test. No smarter merge closes the gap: CombSUM,
+CombMNZ, CombMAX and cross-validated weights all lose to the joint vector, which instead recovers 43–71%
+of the distance between the best merge and an oracle that routes each question to its best signal. Two
+predictions we expected to limit the finding did not hold. Removing burned-in
 captions did not hurt the joint vector, and pairing each photo with unrelated text hurt late fusion more
 than early fusion (−0.51 vs −0.23 Hit@1), because rank fusion depends on the separate lists agreeing.
 We then found the boundary: when one signal is long, one vector per record loses to chunked late fusion
@@ -46,6 +47,7 @@ Which retrieves better, and when does the answer change?
 | Interviews: 6 videos, one program, burned-in captions | 65 scenes | keyframe, transcript | 30 speech + 30 visual | the authors |
 | Station: 6 videos, different domain, no captions | 386 scenes | keyframe, transcript | 40 speech + 40 visual | an AI agent, blind |
 | Photos: 16 topics | 394 photos | title, description, photo | 40 text + 40 visual | an AI agent, blind |
+| Met artworks: 16 subjects (CC0) | 400 works | title, catalogue details, image | 40 text + 40 visual | an AI agent, blind |
 
 "Blind" means the question writer saw only the media (keyframes, transcripts, photos, captions), never
 the code, the systems or any results. Every label was checked mechanically (answer phrases occur in
@@ -89,6 +91,8 @@ or starts within 3 s of it.
     recovers visual accuracy to ≥ 0.80.
 11. With paragraph breaks removed, a semantic chunker beats fixed-size chunking and comes within 0.05 of
     ideal boundaries.
+12. On a non-NASA domain (Metropolitan Museum artworks), the joint vector beats merged rankings
+    significantly, against both RRF and CombSUM.
 
 ## 3. Results
 
@@ -99,6 +103,8 @@ or starts within 3 s of it.
 | Interviews | **0.83** | 0.65 | 14 | 3 | 0.013 |
 | Station (held out) | **0.62** | 0.21 | 40 | 7 | < 0.001 |
 | Photos | **0.93** | 0.62 | 25 | 1 | < 0.001 |
+| Met artworks (not NASA) | **0.95** | 0.62 | 28 | 2 | < 0.001 |
+| Met artworks, vs CombSUM | **0.95** | 0.81 | 11 | 0 | < 0.001 |
 
 The gap widened on data nobody tuned on: late fusion's weights, set on the interviews, fell to 0.21 on
 the station videos, while the joint vector held at 0.62.
@@ -250,7 +256,7 @@ the comparison in §3.1 on your labelled questions and reports the paired test.
 
 ## 5. Limitations
 
-- All three corpora are NASA media. Lectures, meetings, sports, e-commerce and document collections may
+- Three of the four corpora are NASA media; the fourth is museum art. Lectures, meetings, sports, e-commerce and document collections may
   behave differently.
 - 60–80 questions per corpus. The paired test separates real gaps from noise; it doesn't make small
   corpora representative.

@@ -200,6 +200,8 @@ def main() -> None:
         "",
         *beyond_video(),
         "",
+        *outside_nasa(),
+        "",
         *smarter_merges(),
         "",
         *boundary_section(),
@@ -496,6 +498,38 @@ def chunker_lines() -> list[str]:
 
 def _oracle_wins(row: dict) -> bool:
     return row["p"] < 0.05 and row["method_only"] > row["joint_only"]
+
+
+def outside_nasa() -> list[str]:
+    """The Met's open-access collection: a different domain, through Collection.evaluate()."""
+    import met
+
+    res = met.evaluate()
+    rows, wins = [], []
+    for fusion, label in (("rrf", "RRF"), ("sum", "CombSUM (strongest merge)")):
+        r, kinds = res[fusion]["report"], res[fusion]["by_kind"]
+        rows.append(f"| {label} | {r.joint.hit1:.2f} | {r.merged.hit1:.2f} | {kinds['visual'][0]:.2f} vs "
+                    f"{kinds['visual'][1]:.2f} | {kinds['text'][0]:.2f} vs {kinds['text'][1]:.2f} | "
+                    f"{r.joint_only} vs {r.merged_only} | {fmt_p(r.p)} |")
+        wins.append(r.winner == "joint")
+    return [
+        "## Outside NASA: the Met",
+        "",
+        f"{res['n_records']} public-domain artworks from the Metropolitan Museum's open-access collection (CC0), "
+        "16 subjects from armor to calligraphy ([corpus](met_corpus.json)), each embedded as `Text(title) + "
+        "Text(details) + Image(photo)`, details being artist, date, medium, culture and department. 80 questions "
+        "([questions](queries_met.json)), half about what a work shows and half about its catalogue facts, were "
+        "written by an AI agent that saw only the images and records. Run with `Collection.evaluate()` against "
+        "two merges. Code: [met.py](met.py).",
+        "",
+        "| Merged with | Joint Hit@1 | Merged Hit@1 | Visual (joint vs merged) | Text (joint vs merged) | "
+        "Joint only vs merged only | p |",
+        "| --- | --- | --- | --- | --- | --- | --- |",
+        *rows,
+        "",
+        "**Prediction vs outcome** (recorded before any Met data existed): the joint vector beats merged rankings "
+        "significantly against both RRF and CombSUM: " + ("held." if all(wins) else "did not hold."),
+    ]
 
 
 def smarter_merges() -> list[str]:

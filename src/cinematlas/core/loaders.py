@@ -159,9 +159,16 @@ class Screenshots(Loader):
 
     def __iter__(self) -> Iterator[dict[str, Any]]:
         reader = _ocr_reader() if self.ocr else None
-        for record in ImageFolder(self.folder, recursive=self.recursive):
-            yield {"path": record["path"], "name": record["name"], "folder": record["folder"],
-                   "text": _read_lines(reader, record["path"]) if reader else None}
+        try:
+            for record in ImageFolder(self.folder, recursive=self.recursive):
+                yield {"path": record["path"], "name": record["name"], "folder": record["folder"],
+                       "text": _read_lines(reader, record["path"]) if reader else None}
+        finally:
+            # Release the ONNX session now, not at interpreter exit, where its teardown can race.
+            del reader
+            import gc
+
+            gc.collect()
 
 
 def _ocr_reader() -> Any:

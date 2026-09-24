@@ -141,7 +141,9 @@ photos and their text. Half ask what a photo shows, half ask about facts in its 
 comparison with `evaluate()`, the same check anyone can run on their own collection.
 
 The joint vector scored **0.93**; merged rankings **0.62**. It won 25 of the 26 questions where they
-disagreed.
+disagreed. Then, to leave NASA entirely, 400 artworks from the Metropolitan Museum's open-access
+collection, with the same setup: **0.95** against 0.62, and against the strongest merge we found, 11
+disputed questions to none.
 
 ## Wrong again, twice
 
@@ -215,13 +217,14 @@ them is long, chunk it, and fuse each chunk.**
 
 ## What we don't know yet
 
-Three corpora, all NASA, 220 questions. The paired test tells us which gaps are real; it doesn't make
-three corpora representative of lectures, meetings, e-commerce or documents. The router's lean toward
+Four corpora, three of them NASA, 300 questions, none written by people outside the project. The paired
+test tells us which gaps are real; it doesn't make four corpora representative of lectures, meetings,
+e-commerce or documents. The router's lean toward
 speech questions is consistent but not yet significant. Adaptive routing isn't perfectly repeatable:
 between two runs it changed its answer on one held-out question. The long records we tested were built by
 padding real descriptions, not real long documents with their own structure.
 
-The write-up, with eleven predictions made in advance and how each came out, is
+The write-up, with twelve predictions made in advance and how each came out, is
 [paper.md](https://github.com/ranfysvalle02/cinematlas/blob/main/paper.md); every table is in
 [bench/RESULTS.md](https://github.com/ranfysvalle02/cinematlas/blob/main/bench/RESULTS.md). If it breaks
 on your data, `evaluate()` will tell you, and we want to know.
