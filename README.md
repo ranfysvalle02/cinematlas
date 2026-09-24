@@ -51,7 +51,7 @@ boundaries, statistically indistinguishable; fixed-size chunks score 0.82–0.85
 0.59 (8 descriptions per record).
 
 Both come with paired significance tests and twelve predictions written down before each run, four of
-which failed. [Paper](https://github.com/ranfysvalle02/cinematlas/blob/main/paper.md) · [every table](https://github.com/ranfysvalle02/cinematlas/blob/main/bench/RESULTS.md) · [the story](https://github.com/ranfysvalle02/cinematlas/blob/main/blog.md) ·
+which failed. [TL;DR](https://github.com/ranfysvalle02/cinematlas/blob/main/TLDR.md) · [Paper](https://github.com/ranfysvalle02/cinematlas/blob/main/paper.md) · [every table](https://github.com/ranfysvalle02/cinematlas/blob/main/bench/RESULTS.md) · [the story](https://github.com/ranfysvalle02/cinematlas/blob/main/blog.md) ·
 [review](https://github.com/ranfysvalle02/cinematlas/blob/main/REVIEW.md)
 
 **In the library:** video `search()` ranks scenes with the joint vector and uses a reranker only to pick
@@ -297,6 +297,8 @@ uv run python bench/ingest.py                        # benchmark corpora, once: 
 uv run python bench/ingest.py --no-captions          #   caption ablation,
 uv run python bench/ingest.py --station              #   held-out video,
 uv run python bench/photos.py --ingest               #   photos (aligned and misaligned)
+uv run python bench/met.py --ingest                  #   Met artworks
+uv run python bench/boundary.py --ingest             #   boundary tests (see paper.md for the full list)
 uv run python bench/run.py                           # every table and paired test → bench/RESULTS.md
 ```
 

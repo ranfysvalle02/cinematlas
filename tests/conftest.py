@@ -70,3 +70,24 @@ def clip_server(real_clip):
 class _QuietHandler(SimpleHTTPRequestHandler):
     def log_message(self, *args):
         pass
+
+
+# ONNX Runtime (loaded by rapidocr and faster-whisper's VAD) can abort during interpreter teardown on
+# macOS ("recursive_mutex lock failed"), after every test has passed and been reported. Exiting right
+# after pytest finishes skips that teardown; the exit status is preserved.
+_EXIT_STATUS = 0
+
+
+def pytest_sessionfinish(session, exitstatus):
+    global _EXIT_STATUS
+    _EXIT_STATUS = int(exitstatus)
+
+
+def pytest_unconfigure(config):
+    import os
+    import sys
+
+    if sys.platform == "darwin" and "onnxruntime" in sys.modules:
+        sys.stdout.flush()
+        sys.stderr.flush()
+        os._exit(_EXIT_STATUS)

@@ -274,13 +274,15 @@ the comparison in §3.1 on your labelled questions and reports the paired test.
 ## 6. Reproduce
 
 ```bash
-uv run python bench/ingest.py                    # interviews
-uv run python bench/ingest.py --no-captions      # caption ablation
-uv run python bench/ingest.py --station          # station corpus
-uv run python bench/photos.py --ingest           # photos, aligned and misaligned
-uv run python bench/boundary.py --ingest         # single-part and long-record tests
-uv run python bench/boundary.py --ingest-chunk-fusion 8 32 && uv run python bench/boundary.py --ingest-library
-uv run python bench/run.py                       # every table here → bench/RESULTS.md (incl. bench/fusion.py)
+uv run python bench/ingest.py                                  # interviews
+uv run python bench/ingest.py --no-captions                    # caption ablation
+uv run python bench/ingest.py --station                        # station corpus
+uv run python bench/photos.py --ingest                         # photos, aligned and misaligned
+uv run python bench/met.py --ingest                            # Met artworks
+uv run python bench/boundary.py --ingest                       # single-part and long-record tests
+uv run python bench/boundary.py --ingest-chunk-fusion 8 32     # chunk-level fusion, ideal boundaries
+uv run python bench/boundary.py --ingest-chunkers              # real chunkers, no paragraph breaks
+uv run python bench/run.py                                     # every table here → bench/RESULTS.md
 ```
 
 Full tables: [bench/RESULTS.md](https://github.com/ranfysvalle02/cinematlas/blob/main/bench/RESULTS.md).
