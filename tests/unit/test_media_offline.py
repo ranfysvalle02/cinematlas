@@ -48,7 +48,7 @@ def test_video_without_audio_track_yields_none(engine, colour_video, tmp_path):
 
 
 def test_missing_ffmpeg_degrades_to_visual_only(engine, video_with_audio, tmp_path, monkeypatch):
-    monkeypatch.setattr("cinematlas.engine.shutil.which", lambda _n: None)
+    monkeypatch.setattr("cinematlas.media.shutil.which", lambda _n: None)
     assert engine._extract_audio(str(video_with_audio), str(tmp_path)) is None
 
 

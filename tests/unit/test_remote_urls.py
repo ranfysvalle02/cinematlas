@@ -101,14 +101,14 @@ def test_signed_url_video_id_is_stable_across_fresh_signatures(engine, fake_mong
     ],
 )
 def test_ssrf_guard_refuses_non_public_addresses(engine, downloads, monkeypatch, host, ip):
-    monkeypatch.setattr("cinematlas.engine.socket.getaddrinfo", fake_resolver({host: ip}))
+    monkeypatch.setattr("cinematlas.urlsafety.socket.getaddrinfo", fake_resolver({host: ip}))
     with pytest.raises(IngestionError, match="non-public address"):
         engine.ingest_video(f"https://{host}/v.mp4")
     assert downloads == [], "must refuse before any request is made"
 
 
 def test_private_urls_can_be_explicitly_allowed(engine, downloads, monkeypatch):
-    monkeypatch.setattr("cinematlas.engine.socket.getaddrinfo", fake_resolver({"nas.lan": "192.168.1.5"}))
+    monkeypatch.setattr("cinematlas.urlsafety.socket.getaddrinfo", fake_resolver({"nas.lan": "192.168.1.5"}))
     engine.allow_private_urls = True
     with pytest.raises(IngestionError, match="stop after fetch"):
         engine.ingest_video("http://nas.lan/media/v.mp4")
@@ -135,7 +135,7 @@ def test_unresolvable_host_is_a_clear_error(engine, downloads, monkeypatch):
     def fail(*a, **k):
         raise socket.gaierror("nodename nor servname provided")
 
-    monkeypatch.setattr("cinematlas.engine.socket.getaddrinfo", fail)
+    monkeypatch.setattr("cinematlas.urlsafety.socket.getaddrinfo", fail)
     with pytest.raises(IngestionError, match="Cannot resolve"):
         engine.ingest_video("https://no-such-host.example/v.mp4")
 

@@ -9,8 +9,7 @@ import pytest
 from pymongo.errors import OperationFailure
 from support import FakeCollection
 
-from cinematlas import IngestResult, SearchHit, SearchResults
-from cinematlas import engine as engine_module
+from cinematlas import IngestResult, SearchHit, SearchResults, capabilities
 from cinematlas.doctor import explain_native_failure
 from cinematlas.indexes import (
     definition_drift,
@@ -151,7 +150,7 @@ def test_search_mapping_drift_ignores_server_added_field_options():
 
 
 def test_disabled_rerank_warns_once_with_the_fix_and_search_still_works(engine, fake_mongo, caplog, monkeypatch):
-    monkeypatch.setattr(engine_module, "_WARNED", set())
+    monkeypatch.setattr(capabilities, "_WARNED", set())
     engine._resolved_transcript_mode = "client"
     fake_mongo.collection.results_by_index = {"cinematlas_transcript_index": [
         {"video_id": "v", "scene_id": 0, "transcript": "sonic boom", "segments": []}]}
@@ -218,7 +217,7 @@ def test_doctor_explains_every_problem_with_a_fix(engine, fake_mongo, monkeypatc
         {"video_id": "old", "scene_id": 0, "status": "COMPLETED"},  # pre-0.2 document
         {"video_id": "bad", "status": "FAILED", "error_message": "403"},
     ]
-    monkeypatch.setattr("cinematlas.engine.shutil.which", lambda _n: None)
+    monkeypatch.setattr("cinematlas.doctor.shutil.which", lambda _n: None)
     report = engine.doctor(check_voyage=False)
     by_name = {c.name: c for c in report.checks}
 
@@ -247,3 +246,15 @@ def test_engine_repr_is_informative_and_does_no_io(engine, fake_mongo):
     engine._resolved_transcript_mode, engine.rerank_model = "autoembed", None
     assert repr(engine).endswith("transcripts=autoembed · rerank=off>")
     assert fake_mongo.collection.ops == before and fake_mongo.collection.pipelines == []
+
+
+# ---------------------------------------------------------------- engine split: moved patch points fail loudly
+@pytest.mark.parametrize("module,name", [("socket", "getaddrinfo"), ("time", "sleep"), ("shutil", "which")])
+def test_moved_patch_points_no_longer_exist_on_the_engine_module(module, name):
+    """socket/time/shutil moved to urlsafety/embed+media/media+doctor. A stale patch on cinematlas.engine
+    must raise, not silently patch nothing."""
+    import cinematlas.engine
+
+    assert not hasattr(cinematlas.engine, module)
+    with pytest.raises((AttributeError, ImportError)):
+        pytest.MonkeyPatch().setattr(f"cinematlas.engine.{module}.{name}", lambda *a, **k: None)

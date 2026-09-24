@@ -207,9 +207,9 @@ def test_text_source_uses_atlas_search_with_video_filter(indexed, fake_mongo):
 def test_uncalibrated_reranker_steps_down_to_fixed_fusion_and_says_so_once(indexed, caplog, monkeypatch):
     import logging
 
-    from cinematlas import engine as engine_module
+    from cinematlas import capabilities
 
-    monkeypatch.setattr(engine_module, "_WARNED", set())
+    monkeypatch.setattr(capabilities, "_WARNED", set())
     indexed.rerank_model = "rerank-2.5-lite"  # different score scale: no calibration on record
     with caplog.at_level(logging.WARNING, logger="cinematlas"):
         first = indexed.search("jet silhouette against grey clouds", routing="adaptive")

@@ -14,7 +14,7 @@ import sys
 
 import cv2
 import pytest
-from support import REAL_CLIP_SECONDS, REAL_CLIP_SHA256, REAL_CLIP_TOPICS
+from support import REAL_CLIP_SECONDS, REAL_CLIP_SHA256, REAL_CLIP_TOPICS, FakeMongoClient, FakeVoyage
 
 from cinematlas import Cinematlas
 from cinematlas._utils import assign_transcripts
@@ -39,10 +39,9 @@ def probe(path):
 def engine(test_whisper_model):
     """Engine with no DB traffic: only the media stages are exercised."""
     pytest.importorskip("faster_whisper")
-    eng = Cinematlas.__new__(Cinematlas)
-    eng.openai_client = None
-    eng.whisper_model = test_whisper_model
-    eng._local_whisper = None
+    eng = Cinematlas(mongo_client=FakeMongoClient(), voyage_client=FakeVoyage(), ping=False,
+                     whisper_model=test_whisper_model)
+    eng.openai_client = None  # these tests are about local faster-whisper, whatever the environment says
     return eng
 
 

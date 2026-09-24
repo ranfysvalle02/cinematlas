@@ -15,7 +15,7 @@ def make_engine(monkeypatch, *, autoembed_supported=True, **kwargs):
     mongo = FakeMongoClient()
     mongo.collection = FakeCollection(autoembed_supported=autoembed_supported)
     voyage = FakeVoyage()
-    monkeypatch.setattr("cinematlas.engine.time.sleep", lambda _s: None)
+    monkeypatch.setattr("cinematlas.embed.time.sleep", lambda _s: None)
     return Cinematlas(mongo_client=mongo, voyage_client=voyage, ping=False, **kwargs), mongo.collection, voyage
 
 

@@ -101,7 +101,7 @@ def test_failed_reingest_tombstone_does_not_hide_previous_version(engine, fake_m
     # The next successful ingest cleans up both the old version and the tombstone.
     monkeypatch.undo()
     serve(colour_video)
-    monkeypatch.setattr("cinematlas.engine.time.sleep", lambda _s: None)
+    monkeypatch.setattr("cinematlas.media.time.sleep", lambda _s: None)
     engine.ingest_video(URL)
     assert sorted(d["status"] for d in fake_mongo.collection.docs) == ["COMPLETED"] * 3
 

@@ -118,7 +118,9 @@ def _assert_real_clip_searchable(eng, vid):
 
     # Default: the joint vector ranks scenes, reranked sentences pick the exact moment.
     question = "how many medals has the beer won?"
-    hits = eventually(lambda: (r := eng.search(question, top_k=3, video_id=vid)) and "rerank" in r[0]["ranks"] and r)
+    # Wait for the joint vectors to sync: until then the default correctly falls back to fusion.
+    hits = eventually(lambda: (r := eng.search(question, top_k=3, video_id=vid)) and "scene" in r[0]["ranks"]
+                      and "rerank" in r[0]["ranks"] and r)
     assert hits and hits[0]["scene_id"] == 3
     assert "medals" in hits[0]["moment"]["text"].lower()
     assert hits[0]["moment"]["start"] > hits[0]["timestamp_start"], "moment is inside the scene, not its start"
