@@ -1,6 +1,6 @@
 # Fuse in the embedding, not in the ranking
 
-**Early vs late fusion for multimodal retrieval: four corpora, twelve pre-stated predictions, one boundary**
+**Early vs late fusion for multimodal retrieval: four corpora, fourteen pre-stated predictions, one boundary**
 
 *Cinematlas project · September 2026 · all code, corpora, questions and results:
 [github.com/ranfysvalle02/cinematlas](https://github.com/ranfysvalle02/cinematlas)*
@@ -93,6 +93,9 @@ or starts within 3 s of it.
     ideal boundaries.
 12. On a non-NASA domain (Metropolitan Museum artworks), the joint vector beats merged rankings
     significantly, against both RRF and CombSUM.
+13. On terse, single-detail queries from simulated searchers, it still beats CombSUM significantly, by
+    less. 14. Under deterministic messy typing, both degrade and it still beats CombSUM significantly.
+    (13–14 were committed to git before their runs: [bench/PREDICTIONS.md](https://github.com/ranfysvalle02/cinematlas/blob/main/bench/PREDICTIONS.md).)
 
 ## 3. Results
 
@@ -233,6 +236,21 @@ Every real chunker keeps chunk-level fusion far above one vector per record (0.5
 The semantic chunker is statistically indistinguishable from ideal boundaries; its lead over fixed-size
 chunking (10 vs 4 and 6 vs 2) is not significant at 80 questions.
 
+### 3.10 Realistic queries (predictions 13 and 14: held)
+
+AI-written questions that see the answer tend to be complete and well spelled, which could flatter a
+joint vector. On the Met artworks, two stress tests: an agent simulating visitors who glimpsed one work
+and search from memory (2–5 words, one detail, 1 in 5 misspelled), and the 80 questions degraded by a
+fixed-seed script (filler dropped, at most five words, a typo in about one word in four).
+
+| Queries | Joint | CombSUM | RRF | Joint vs CombSUM |
+| --- | --- | --- | --- | --- |
+| Full questions | **0.95** | 0.81 | 0.62 | 11 vs 0, p < 0.001 |
+| Terse searchers (simulated) | **0.80** | 0.70 | 0.47 | 10 vs 2, p = 0.039 |
+| Messy typing | **0.84** | 0.61 | 0.46 | 20 vs 2, p < 0.001 |
+
+The lead narrows on terse queries, as predicted, and widens under noise: merged rankings lose more.
+
 ## 4. Discussion
 
 **Why late fusion loses.** Every question about only one signal (most questions) produces lists that
@@ -260,8 +278,8 @@ the comparison in §3.1 on your labelled questions and reports the paired test.
   behave differently.
 - 60–80 questions per corpus. The paired test separates real gaps from noise; it doesn't make small
   corpora representative.
-- Questions for the second and third corpora were written by an AI agent. It was blind to the systems,
-  but not a human searcher, and it may phrase queries in ways embedding models find easy.
+- Questions were written by us or an AI agent blind to the systems. §3.10 shows the result survives
+  terse, from-memory and misspelled queries, but simulated searchers are not real users.
 - Late fusion was tested as five merges (RRF, CombSUM, CombMNZ, CombMAX, cross-validated weights) and an
   oracle. Learned-to-rank models over merged candidates were not tested.
 - The interview corpus tuned the late-fusion weights and routing thresholds; its numbers favour those

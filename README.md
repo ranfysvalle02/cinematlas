@@ -33,8 +33,9 @@ on any question about one signal, the lists disagree, and merging averages the r
 | **one joint vector per record** | **0.83** | **0.62** | **0.93** | **0.95** |
 
 It wins on data nobody tuned on (240 questions written blind by an AI agent, on space footage, space
-photography and museum art), isn't reading burned-in subtitles, and wins even when a record's parts
-describe different things (0.70 vs 0.11).
+photography and museum art), isn't reading burned-in subtitles, wins even when a record's parts describe
+different things (0.70 vs 0.11), and holds on the kind of queries people really type: terse and from
+memory (0.80 vs 0.70 against the strongest merge) or full of typos (0.84 vs 0.61).
 
 **Chunk.** One vector per record breaks when a part is long. Bury each photo's description among 31
 others and the joint vector falls below chunked late fusion; the long text even drowns out the photo.
@@ -50,7 +51,7 @@ and `Semantic` (cut where adjacent sentences stop being similar) scores **0.90 a
 boundaries, statistically indistinguishable; fixed-size chunks score 0.82–0.85 and one vector per record
 0.59 (8 descriptions per record).
 
-Both come with paired significance tests and twelve predictions written down before each run, four of
+Both come with paired significance tests and fourteen predictions written down before each run, four of
 which failed. [TL;DR](https://github.com/ranfysvalle02/cinematlas/blob/main/TLDR.md) · [Paper](https://github.com/ranfysvalle02/cinematlas/blob/main/paper.md) · [every table](https://github.com/ranfysvalle02/cinematlas/blob/main/bench/RESULTS.md) · [the story](https://github.com/ranfysvalle02/cinematlas/blob/main/blog.md) ·
 [review](https://github.com/ranfysvalle02/cinematlas/blob/main/REVIEW.md)
 

@@ -1,16 +1,17 @@
 # Cinematlas: project review
 
-*A candid assessment of the project as of v0.10: the research, the software, and what's left.*
+*A candid assessment of the project as of v0.11: the research, the software, and what's left.*
 
 ---
 
 ## TL;DR
 
-**8.5 / 10.** A small library with an unusually well-tested finding: embed a record's signals together
+**9 / 10.** A small library with an unusually well-tested finding: embed a record's signals together
 (early fusion) instead of indexing them separately and merging rankings (late fusion), and chunk long
 parts, fusing each chunk. It holds across four corpora in three domains (video, space photography,
 museum art), three of which nobody tuned on, and beats every merging method we could find. The boundary where it stops working was found and fixed rather than hidden.
-The main gap is external validity: most questions were written by an AI agent, none by outside users.
+What's left is real users: the questions were written by us or an AI agent, and while the result
+survives terse, from-memory and misspelled queries, simulated searchers aren't real ones.
 
 ## Executive summary
 
@@ -39,15 +40,15 @@ their own data instead of taking it on trust.
 
 | Dimension | Score | Why |
 | --- | --- | --- |
-| **Research rigor** | **9.5** | Paired significance tests, not averages. Held-out data with questions written blind. Twelve predictions recorded before the runs that tested them, four of which failed and are reported. A tuning set kept separate from the test set. An oracle ceiling. |
+| **Research rigor** | **9.5** | Paired significance tests, not averages. Held-out data with questions written blind. Fourteen predictions recorded before the runs that tested them, four of which failed and are reported; the newest are committed to git before their runs. A tuning set kept separate from the test set. An oracle ceiling. |
 | **Insight** | **8.5** | Early vs late fusion is a known axis in multimodal learning; the contribution is a practical, falsifiable rule for retrieval, a measured boundary (length, not misalignment), and a working fix (chunk-level fusion). The explanation of *why* rank fusion fails (it needs lists to agree) is clean and testable. |
 | **Software engineering** | **8.5** | 310 unit tests, media tests on real ffmpeg/Whisper, live integration tests on Atlas cloud and Atlas Local. The engine was split into focused modules with no API change. Graceful fallbacks everywhere. Deductions: integration tests don't run in CI, and the facade is 540 lines (mostly docstrings for the public API). |
 | **Developer experience** | **9** | Four commands from install to a deep link. `doctor` prints the exact fix. Every README output is real. Five examples, each run live. `evaluate()` turns the claim into something users can verify. |
 | **Documentation & storytelling** | **9** | Three documents with distinct jobs: README (use it), blog (the story, including where we were wrong), paper (methods, predictions, limits). Every number traces to a generated `RESULTS.md`. |
 | **Reproducibility** | **8.5** | Every table regenerates from `bench/`; corpora, questions and distractors are committed. It still needs an Atlas cluster, a Voyage key and hours of embedding. |
-| **External validity** | **7.5** | Four corpora in three domains: video, space photography and museum art (the Met, added in v0.10: 0.95 vs 0.62). 300 questions, most written by an AI agent rather than human searchers. The long-record tests pad real descriptions rather than using real long documents. |
+| **External validity** | **8** | Four corpora in three domains: video, space photography and museum art (0.95 vs 0.62). The result survives terse from-memory queries (0.80 vs 0.70 vs the strongest merge) and messy typing (0.84 vs 0.61). Still no real users, and the long-record tests pad real descriptions rather than using real long documents. |
 | **Production readiness** | **7.5** | Safe URL handling, idempotent setup, gapless re-ingest, per-record failure isolation. Deductions: one embedding provider, a young `core` API, and chunk-level fusion re-embeds the image with every chunk, which multiplies embedding cost. |
-| **Overall** | **8.5** | |
+| **Overall** | **9** | The core claim now survives every objection we could test without real users. |
 
 ---
 
@@ -67,20 +68,19 @@ their own data instead of taking it on trust.
 
 ## What holds it back
 
-1. **No human questions.** Four corpora in three domains, but every question was written by us or an AI
-   agent. Questions from real users, on a product catalog or real document collection, are the test left.
+1. **No real users.** The result survives simulated terse searchers and messy typing, but every query
+   was written by us, an AI agent or a script. Real users on a real product are the test left.
 2. **Sample sizes.** 60–80 questions per corpus separates large effects from noise but leaves smaller
    ones unresolved: the router's lead on speech questions, and the semantic chunker's lead over
    fixed-size chunks, are consistent but not significant.
 3. **Cost of chunk-level fusion.** Embedding the image with every chunk is simple and accurate but
    expensive for long documents with many chunks; smarter sharing (e.g. one image embedding reused
    across chunks via a model that supports it) is unexplored.
-4. **CI coverage.** Unit and media tests run in CI; the Atlas integration tier runs only locally.
+4. **CI coverage** (minor). Unit and media tests run in CI; the Atlas integration tier runs locally.
 
-## What would move it to 9.5
+## What would move it to 10
 
 - Run `evaluate()` on a real dataset with questions written by people.
-- Run the Atlas integration tests in CI against Atlas Local in Docker.
 - Test chunk-level fusion on real long documents (manuals, papers) with their own structure.
 
 ---
@@ -90,8 +90,8 @@ their own data instead of taking it on trust.
 | | |
 | --- | --- |
 | Corpora | 4 (interviews, held-out video, NASA photos, Met artworks) + constructed boundary sets |
-| Benchmark questions | 300, of which 240 written blind by an AI agent |
-| Pre-stated predictions | 12 (8 held, 4 failed) |
+| Benchmark questions | 380 (plus 80 noise-degraded), 320 written blind by AI agents |
+| Pre-stated predictions | 14 (10 held, 4 failed) |
 | Late-fusion methods beaten | 5 (RRF, CombSUM, CombMNZ, CombMAX, cross-validated weights) |
 | Tests | 310 unit + media + 18 live integration (Atlas cloud and Atlas Local) |
 | Source modules | 9 engine modules + `cinematlas.core` (8 modules) |

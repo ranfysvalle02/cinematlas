@@ -217,14 +217,16 @@ them is long, chunk it, and fuse each chunk.**
 
 ## What we don't know yet
 
-Four corpora, three of them NASA, 300 questions, none written by people outside the project. The paired
+Four corpora, three of them NASA, and no questions yet from people outside the project. We did check the
+obvious worry, that AI-written questions are too clean: on terse, from-memory queries the joint vector
+still wins (0.80 vs 0.70 against the strongest merge), and with typos the gap grows (0.84 vs 0.61). The paired
 test tells us which gaps are real; it doesn't make four corpora representative of lectures, meetings,
 e-commerce or documents. The router's lean toward
 speech questions is consistent but not yet significant. Adaptive routing isn't perfectly repeatable:
 between two runs it changed its answer on one held-out question. The long records we tested were built by
 padding real descriptions, not real long documents with their own structure.
 
-The write-up, with twelve predictions made in advance and how each came out, is
+The write-up, with fourteen predictions made in advance and how each came out, is
 [paper.md](https://github.com/ranfysvalle02/cinematlas/blob/main/paper.md); every table is in
 [bench/RESULTS.md](https://github.com/ranfysvalle02/cinematlas/blob/main/bench/RESULTS.md). If it breaks
 on your data, `evaluate()` will tell you, and we want to know.

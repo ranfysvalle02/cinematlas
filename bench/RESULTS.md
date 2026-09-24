@@ -7,24 +7,24 @@ Corpus: 6 NASA *The Quiet Crew* interviews (65 scenes; one program, one topic, o
 
 | Configuration | Speech Hit@1 | Visual Hit@1 | **Mean Hit@1** | Speech MRR | Visual MRR | Moment@1 | p50 |
 | --- | --- | --- | --- | --- | --- | --- | --- |
-| visual only (keyframes) | 0.53 | 0.90 | **0.72** | 0.603 | 0.925 | — | 305 ms |
-| joint vector only (image+speech) | 0.73 | 0.93 | **0.83** | 0.801 | 0.956 | — | 73 ms |
-| full-text only (Atlas Search BM25) | 0.60 | 0.30 | **0.45** | 0.652 | 0.360 | — | 61 ms |
-| transcript only · autoEmbed voyage-4 | 0.83 | 0.23 | **0.53** | 0.886 | 0.365 | — | 129 ms |
-| transcript only · client voyage-4 | 0.83 | 0.20 | **0.52** | 0.886 | 0.347 | — | 280 ms |
-| transcript only · client, voyage-4-lite queries | 0.83 | 0.23 | **0.53** | 0.889 | 0.366 | — | 282 ms |
-| transcript + rerank | 0.90 | 0.43 | **0.67** | 0.937 | 0.522 | 0.78 | 455 ms |
-| fixed fusion, equal weights, no rerank | 0.57 | 0.60 | **0.58** | 0.721 | 0.688 | 0.57 | 198 ms |
-| fixed fusion, equal weights + rerank | 0.70 | 0.57 | **0.63** | 0.799 | 0.661 | 0.71 | 520 ms |
-| fixed fusion, tuned weights + rerank | 0.80 | 0.50 | **0.65** | 0.853 | 0.600 | 0.75 | 489 ms |
-| adaptive routing · autoEmbed | 0.83 | 0.80 | **0.82** | 0.888 | 0.850 | 0.76 | 506 ms |
-| **scene-first (default)**: joint vector ranks, reranker picks the second | 0.73 | 0.93 | **0.83** | 0.801 | 0.956 | 0.73 | 269 ms |
-| adaptive · client-side fusion | 0.83 | 0.80 | **0.82** | 0.888 | 0.850 | 0.76 | 983 ms |
-| adaptive · client transcript mode | 0.83 | 0.80 | **0.82** | 0.888 | 0.850 | 0.76 | 661 ms |
+| visual only (keyframes) | 0.53 | 0.90 | **0.72** | 0.603 | 0.925 | — | 297 ms |
+| joint vector only (image+speech) | 0.73 | 0.93 | **0.83** | 0.801 | 0.956 | — | 89 ms |
+| full-text only (Atlas Search BM25) | 0.60 | 0.30 | **0.45** | 0.652 | 0.360 | — | 90 ms |
+| transcript only · autoEmbed voyage-4 | 0.83 | 0.23 | **0.53** | 0.886 | 0.365 | — | 164 ms |
+| transcript only · client voyage-4 | 0.83 | 0.20 | **0.52** | 0.886 | 0.347 | — | 265 ms |
+| transcript only · client, voyage-4-lite queries | 0.83 | 0.23 | **0.53** | 0.889 | 0.366 | — | 261 ms |
+| transcript + rerank | 0.90 | 0.43 | **0.67** | 0.937 | 0.522 | 0.78 | 443 ms |
+| fixed fusion, equal weights, no rerank | 0.57 | 0.57 | **0.57** | 0.727 | 0.672 | 0.57 | 180 ms |
+| fixed fusion, equal weights + rerank | 0.70 | 0.57 | **0.63** | 0.799 | 0.661 | 0.71 | 476 ms |
+| fixed fusion, tuned weights + rerank | 0.80 | 0.50 | **0.65** | 0.853 | 0.600 | 0.75 | 485 ms |
+| adaptive routing · autoEmbed | 0.83 | 0.80 | **0.82** | 0.888 | 0.850 | 0.76 | 477 ms |
+| **scene-first (default)**: joint vector ranks, reranker picks the second | 0.73 | 0.93 | **0.83** | 0.801 | 0.956 | 0.73 | 283 ms |
+| adaptive · client-side fusion | 0.83 | 0.80 | **0.82** | 0.888 | 0.850 | 0.76 | 907 ms |
+| adaptive · client transcript mode | 0.83 | 0.80 | **0.82** | 0.888 | 0.850 | 0.76 | 659 ms |
 
 *Moment@1*: among top-1 speech hits, the returned moment contains the answer or starts within 3 s of it. Latency is the speech-set p50 from a laptop over the internet, including Voyage calls. Hybrid runs as one native `$rankFusion` query unless marked client-side; reranking runs as native `$rerank`. Vector indexes use scalar quantization; vectors are stored as BSON float32.
 
-**Reading this table.** One joint image+speech vector per scene (mean 0.83) beats fusing the same signals after retrieval (best tuned fusion 0.65): it wins 14 questions the fusion misses and loses 3 (exact McNemar p = 0.013). Separate lists disagree on every question that is about only one of the two, and rank fusion averages the disagreement away; a joint vector never produces it. The default, scene-first, ranks with that vector and uses the reranker only to pick the second (Moment@1 0.73), in 269 ms. Adaptive routing, which repairs late fusion by choosing a specialist per question, ties it (4 vs 3, p = 1.000) at 506 ms: it leans ahead on questions about what was said, behind on what was shown.
+**Reading this table.** One joint image+speech vector per scene (mean 0.83) beats fusing the same signals after retrieval (best tuned fusion 0.65): it wins 14 questions the fusion misses and loses 3 (exact McNemar p = 0.013). Separate lists disagree on every question that is about only one of the two, and rank fusion averages the disagreement away; a joint vector never produces it. The default, scene-first, ranks with that vector and uses the reranker only to pick the second (Moment@1 0.73), in 283 ms. Adaptive routing, which repairs late fusion by choosing a specialist per question, ties it (4 vs 3, p = 1.000) at 477 ms: it leans ahead on questions about what was said, behind on what was shown.
 
 **Limits.** 60 questions over 6 videos from one program, written by the authors; one question is 3.3 points, so only gaps confirmed by the paired test count. Weights and routing thresholds were tuned on this set, which is why the held-out corpus below exists. Latency is one laptop to one cloud region, comparative only.
 
@@ -54,12 +54,12 @@ Without captions, keyframes alone lose speech questions (0.53 → 0.40): pixels 
 
 | Configuration | Speech Hit@1 | Visual Hit@1 | Mean Hit@1 | Moment@1 | p50 |
 | --- | --- | --- | --- | --- | --- |
-| keyframes only | 0.12 | 0.88 | **0.50** | — | 75 ms |
-| transcript + rerank | 0.55 | 0.07 | **0.31** | 0.86 | 348 ms |
-| rank fusion, tuned weights + rerank | 0.33 | 0.10 | **0.21** | 0.85 | 514 ms |
-| joint vector only | 0.35 | 0.90 | **0.62** | — | 75 ms |
-| adaptive routing | 0.50 | 0.68 | **0.59** | 0.85 | 523 ms |
-| scene-first | 0.35 | 0.90 | **0.62** | 0.71 | 228 ms |
+| keyframes only | 0.12 | 0.88 | **0.50** | — | 67 ms |
+| transcript + rerank | 0.55 | 0.07 | **0.31** | 0.86 | 354 ms |
+| rank fusion, tuned weights + rerank | 0.33 | 0.10 | **0.21** | 0.85 | 488 ms |
+| joint vector only | 0.35 | 0.90 | **0.62** | — | 69 ms |
+| adaptive routing | 0.50 | 0.68 | **0.59** | 0.85 | 484 ms |
+| scene-first | 0.35 | 0.90 | **0.62** | 0.71 | 213 ms |
 
 | Paired comparison | A right, B wrong | B right, A wrong | p |
 | --- | --- | --- | --- |
@@ -67,7 +67,7 @@ Without captions, keyframes alone lose speech questions (0.53 → 0.40): pixels 
 | scene-first vs adaptive routing | 14 | 11 | 0.690 |
 | joint vector only vs adaptive routing | 14 | 11 | 0.690 |
 
-**Decision rule, fixed before this corpus was run:** scene-first becomes the default if it is not significantly worse than adaptive routing on either corpus and it is faster. On this corpus it is not significantly worse (14 vs 11, p = 0.690) and faster (228 vs 523 ms).
+**Decision rule, fixed before this corpus was run:** scene-first becomes the default if it is not significantly worse than adaptive routing on either corpus and it is faster. On this corpus it is not significantly worse (14 vs 11, p = 0.690) and faster (213 vs 484 ms).
 
 **Where scene-first and routing differ.** They tie overall, but not per category: scene-first is better on questions about what was shown, routing leans ahead on what was said. Finding the exact second is not a difference: on the questions where both found the right scene, scene-first picked the right second 6/9 times and routing 6/9 here (16/22 and 17/22 on the first corpus). The Moment@1 columns above differ only because each method is scored on its own correct answers. If your users mostly ask about speech, pass `routing="adaptive"`.
 
@@ -112,6 +112,18 @@ Reproduce: `uv run python bench/photos.py --ingest`, then `uv run python bench/r
 | CombSUM (strongest merge) | 0.95 | 0.81 | 0.95 vs 0.80 | 0.95 vs 0.82 | 11 vs 0 | < 0.001 |
 
 **Prediction vs outcome** (recorded before any Met data existed): the joint vector beats merged rankings significantly against both RRF and CombSUM: held.
+
+## Are the questions too clean?
+
+Benchmark questions written by an AI agent that sees the answer tend to be complete, well spelled and detail-rich, which could flatter a joint vector. Two stress tests on the Met artworks ([predictions](PREDICTIONS.md), committed before the runs): **terse searchers**, an agent simulating a visitor who glimpsed one work and later types 2–5 words from memory, one detail, sometimes misspelled ([queries](queries_met_searchers.json)); and **messy typing**, the 80 questions degraded by a fixed-seed script (filler dropped, at most five words, a typo in about one word in four; `met.noisy`).
+
+| Queries | Joint | CombSUM | RRF | Joint only vs CombSUM only | p |
+| --- | --- | --- | --- | --- | --- |
+| full questions | **0.95** | 0.81 | 0.62 | 11 vs 0 | < 0.001 |
+| messy typing (deterministic) | **0.84** | 0.61 | 0.46 | 20 vs 2 | < 0.001 |
+| terse searchers (simulated) | **0.80** | 0.70 | 0.47 | 10 vs 2 | 0.039 |
+
+Both predictions held. The joint vector keeps a significant lead over the strongest merge on terse, single-detail queries, and under messy typing the gap widens: merged rankings degrade faster than the joint vector. Real users remain untested.
 
 ## Can a smarter merge win?
 

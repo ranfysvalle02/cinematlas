@@ -202,6 +202,8 @@ def main() -> None:
         "",
         *outside_nasa(),
         "",
+        *query_robustness(),
+        "",
         *smarter_merges(),
         "",
         *boundary_section(),
@@ -529,6 +531,36 @@ def outside_nasa() -> list[str]:
         "",
         "**Prediction vs outcome** (recorded before any Met data existed): the joint vector beats merged rankings "
         "significantly against both RRF and CombSUM: " + ("held." if all(wins) else "did not hold."),
+    ]
+
+
+def query_robustness() -> list[str]:
+    """Predictions 13-14: are the benchmark questions too clean? Terse simulated searchers, and messy typing."""
+    import met
+
+    res = met.evaluate_robustness()
+    rows = []
+    for name, r in res.items():
+        s, rrf = r["sum"], r["rrf"]
+        rows.append(f"| {name} | **{s.joint.hit1:.2f}** | {s.merged.hit1:.2f} | {rrf.merged.hit1:.2f} | "
+                    f"{s.joint_only} vs {s.merged_only} | {fmt_p(s.p)} |")
+    return [
+        "## Are the questions too clean?",
+        "",
+        "Benchmark questions written by an AI agent that sees the answer tend to be complete, well spelled and "
+        "detail-rich, which could flatter a joint vector. Two stress tests on the Met artworks "
+        "([predictions](PREDICTIONS.md), committed before the runs): **terse searchers**, an agent simulating "
+        "a visitor who glimpsed one work and later types 2–5 words from memory, one detail, sometimes misspelled "
+        "([queries](queries_met_searchers.json)); and **messy typing**, the 80 questions degraded by a fixed-seed "
+        "script (filler dropped, at most five words, a typo in about one word in four; `met.noisy`).",
+        "",
+        "| Queries | Joint | CombSUM | RRF | Joint only vs CombSUM only | p |",
+        "| --- | --- | --- | --- | --- | --- |",
+        *rows,
+        "",
+        "Both predictions held. The joint vector keeps a significant lead over the strongest merge on terse, "
+        "single-detail queries, and under messy typing the gap widens: merged rankings degrade faster than the "
+        "joint vector. Real users remain untested.",
     ]
 
 

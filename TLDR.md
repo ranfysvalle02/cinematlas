@@ -21,7 +21,9 @@ including against every smarter merge we could build.
    answer from the transcript index and noise from the image index; rank fusion averages them. It only
    works when every list agrees, which is exactly when you didn't need it.
 2. **A joint vector never produces the disagreement.** The model sees all of a record's signals at once.
-   It wins even when the parts describe different things (0.70 vs 0.11).
+   It wins even when the parts describe different things (0.70 vs 0.11), and on messy real-world queries:
+   terse and from memory (0.80 vs 0.70 against the strongest merge), or full of typos (0.84 vs 0.61),
+   where merged rankings degrade faster.
 3. **It breaks on long parts, and chunking fixes it.** With the answer 1/32 of a record's text, one vector
    per record falls to 0.54. Fuse the image into each chunk and it's back to 0.94; a semantic chunker finds
    the topic boundaries on its own (0.90 vs 0.93 ideal).
@@ -32,7 +34,8 @@ including against every smarter merge we could build.
 
 - **Compare questions, not averages.** On 60–80 questions an average can't separate a real gap from luck.
   An exact paired test on the questions where exactly one system is right can.
-- **Write predictions down before you run.** Twelve here, four wrong. The wrong ones were the most
+- **Write predictions down before you run.** Fourteen here, four wrong, the newest ones committed to
+  git before the run so the timestamp proves it. The wrong ones were the most
   informative: captions weren't the reason it worked, misalignment wasn't its boundary.
 - **Hold data back.** The first corpus tuned everything; two of the three later ones were never looked at
   until the final run, with questions written blind.

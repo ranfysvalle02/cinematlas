@@ -28,6 +28,7 @@ from cinematlas.core.parts import safe_url
 HERE = Path(__file__).parent
 MANIFEST = HERE / "met_corpus.json"
 QUESTIONS = HERE / "queries_met.json"
+SEARCHERS = HERE / "queries_met_searchers.json"  # terse, single-detail queries from simulated searchers
 CACHE = Path(os.getenv("CINEMATLAS_BENCH_CACHE", Path.home() / ".cache" / "cinematlas-bench")) / "met"
 API = "https://collectionapi.metmuseum.org/public/collection/v1"
 SUBJECTS = ["portrait", "landscape", "armor", "vase", "textile", "sculpture", "mask", "jewelry", "ship", "horse",
@@ -97,6 +98,46 @@ def ingest() -> None:
         coll.wait_until_searchable(timeout_s=600)
 
 
+STOPWORDS = {"a", "an", "the", "of", "with", "and", "in", "on", "by", "from", "which", "what", "that", "is",
+             "was", "who", "for", "to", "its", "it", "at", "as", "are", "piece", "work", "made", "one"}
+
+
+def noisy(questions: list[dict], seed: int = 14) -> list[dict]:
+    """Messy typing, deterministically: drop filler words, keep at most 5 words, typo ~1 word in 4."""
+    import random
+
+    rng = random.Random(seed)
+    out = []
+    for q in questions:
+        words = [w for w in q["q"].lower().replace("?", "").replace(",", "").split() if w not in STOPWORDS][:5]
+        typed = []
+        for w in words:
+            if len(w) > 3 and rng.random() < 0.25:
+                i = rng.randrange(len(w) - 1)
+                w = rng.choice([w[:i] + w[i + 1] + w[i] + w[i + 2:],  # swap two letters
+                                w[:i] + w[i + 1:]])                   # drop a letter
+            typed.append(w)
+        out.append({**q, "q": " ".join(typed) or q["q"]})
+    return out
+
+
+def evaluate_robustness() -> dict:
+    """Predictions 13-14: simulated terse searchers, and deterministic messy typing, vs CombSUM and RRF."""
+    sets = {"full questions": json.loads(QUESTIONS.read_text()),
+            "messy typing (deterministic)": noisy(json.loads(QUESTIONS.read_text()))}
+    if SEARCHERS.is_file():
+        sets["terse searchers (simulated)"] = json.loads(SEARCHERS.read_text())
+    out = {}
+    with Atlas() as atlas:
+        coll = collection(atlas)
+        for name, qs in sets.items():
+            out[name] = {f: coll.evaluate(qs, k=10, fusion=f) for f in ("sum", "rrf")}
+            r = out[name]["sum"]
+            print(f"{name}: joint {r.joint.hit1:.2f} vs sum {r.merged.hit1:.2f} ({r.joint_only} vs {r.merged_only}, "
+                  f"p {r.p:.4f}); vs rrf {out[name]['rrf'].merged.hit1:.2f}", flush=True)
+    return out
+
+
 def evaluate() -> dict:
     questions = json.loads(QUESTIONS.read_text())
     out = {}
@@ -119,11 +160,14 @@ if __name__ == "__main__":
     ap = argparse.ArgumentParser()
     ap.add_argument("--build", action="store_true")
     ap.add_argument("--ingest", action="store_true")
+    ap.add_argument("--robustness", action="store_true", help="predictions 13-14")
     args = ap.parse_args()
     if args.build:
         build()
     elif args.ingest:
         ingest()
+    elif args.robustness:
+        evaluate_robustness()
     else:
         if not QUESTIONS.is_file():
             sys.exit(f"Missing {QUESTIONS}")
