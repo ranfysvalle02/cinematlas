@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import copy
 import io
+import urllib.parse
 import urllib.request
 from collections.abc import Callable, Iterable, Mapping
 from pathlib import Path
@@ -111,7 +112,7 @@ def load_image(value: Any, *, timeout_s: float = 20) -> PILImage.Image | None:
     elif isinstance(value, (bytes, bytearray)):
         image = PILImage.open(io.BytesIO(value))
     elif isinstance(value, (str, Path)) and str(value).startswith(("http://", "https://")):
-        request = urllib.request.Request(str(value), headers={"User-Agent": "cinematlas"})
+        request = urllib.request.Request(safe_url(str(value)), headers={"User-Agent": "cinematlas"})
         with urllib.request.urlopen(request, timeout=timeout_s) as response:  # noqa: S310 (http(s) only)
             data = response.read(MAX_IMAGE_BYTES + 1)
         if len(data) > MAX_IMAGE_BYTES:
@@ -126,6 +127,13 @@ def load_image(value: Any, *, timeout_s: float = 20) -> PILImage.Image | None:
         scale = (MAX_IMAGE_PIXELS / (image.width * image.height)) ** 0.5
         image = image.resize((max(1, int(image.width * scale)), max(1, int(image.height * scale))))
     return image
+
+
+def safe_url(url: str) -> str:
+    """Percent-encode characters like spaces that real-world image URLs contain but HTTP forbids."""
+    parts = urllib.parse.urlsplit(url)
+    return urllib.parse.urlunsplit(parts._replace(path=urllib.parse.quote(parts.path, safe="/%~:@!$&'()*+,;="),
+                                                  query=urllib.parse.quote(parts.query, safe="=&%/?:+,;")))
 
 
 class Joint:

@@ -159,12 +159,38 @@ at under half the latency.
   reranker scores only the sentences inside the scenes the vector found, and picks the one that answers.
 - **The router is opt-in.** Here's the honest part: it ties overall, but not everywhere. Ranking by the
   joint vector is better on questions about what was *shown* (9 vs 0 on the held-out set, p = 0.004). The
-  router leans ahead on what was *said*, in both corpora, though neither gap is significant on its own,
-  and when it finds the right scene it lands on the exact second more often (0.85 vs 0.71 on the held-out
-  set). If your users mostly ask about speech, `routing="adaptive"` is one argument away.
+  router leans ahead on what was *said*, in both corpora, though neither gap is significant on its own.
+  If your users mostly ask about speech, `routing="adaptive"` is one argument away.
 
 We could have tuned the default until the speech gap closed. But the held-out set only means something if
 nobody tunes on it, so the default is what the rule we wrote down said it should be.
+
+## Beyond video, and wrong again
+
+The argument never depended on video. So we tested it where it should apply just as well: 394 NASA photos,
+each with a title and a description, and 80 questions written by an AI agent that saw only the photos and
+their text. Half ask about what a photo shows, half about facts in its text. We compared the two designs
+with `evaluate()`, the same check anyone can run on their own collection.
+
+The joint vector scored **0.93**; merged rankings **0.62**. It won 25 of the 26 questions where they
+disagreed.
+
+Then we tried to find where it stops. The obvious boundary: when a record's parts *don't* describe the
+same thing, cramming them into one vector should blur them, and separate indexes should hold up. So we
+paired every photo with another photo's title and description, and predicted, in writing, that the joint
+vector's advantage would disappear.
+
+It didn't. The joint vector fell to 0.70. Merged rankings fell to **0.11**. Rank fusion rewards records
+that rank well in *every* list, so it only works when the lists agree, and misaligned parts are exactly
+when they don't. We were wrong about the boundary; wherever it is, it isn't there.
+
+One more correction. We'd reported that the router lands on the exact second more often (0.85 vs 0.71).
+Those numbers came from different questions: each system scored on its own correct answers. On the
+questions where both found the right scene, they picked the right second equally often (16 vs 17 of 22,
+and 6 vs 6 of 9). The gap was an artifact of how we measured it.
+
+The full write-up, with every prediction and how it came out, is in
+[paper.md](https://github.com/ranfysvalle02/cinematlas/blob/main/paper.md).
 
 ## The lesson that transfers
 
@@ -184,8 +210,9 @@ die, and where teams end up bolting on routers, classifiers and per-query weight
 
 ## What we don't know yet
 
-Two corpora, both NASA, 140 questions in total. The paired test tells us which gaps are real; two domains
-are better than one, but lectures, sports, surveillance and meetings could still behave differently. The
+Three corpora, all NASA, 220 questions in total. The paired test tells us which gaps are real; video and
+photos are better than one domain, but lectures, meetings, e-commerce and documents could still behave
+differently. The
 router's per-category lean toward speech is consistent but not yet significant, and more speech-heavy
 data would settle it. Adaptive routing also isn't perfectly repeatable: between two runs it changed its
 answer on one held-out question.

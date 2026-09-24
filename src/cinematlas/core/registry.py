@@ -15,13 +15,14 @@ from __future__ import annotations
 import logging
 from importlib.metadata import entry_points
 
-from .loaders import ImageFolder, JSONLines, Loader, PDFPages
+from .loaders import ImageFolder, JSONLines, Loader, PDFPages, Screenshots, Slides
 from .parts import Image, Part, Text
 
 logger = logging.getLogger("cinematlas")
 GROUP = "cinematlas.plugins"
 BUILTIN: dict[str, type[Part] | type[Loader]] = {
     "text": Text, "image": Image, "pdf_pages": PDFPages, "image_folder": ImageFolder, "jsonl": JSONLines,
+    "slides": Slides, "screenshots": Screenshots,
 }
 
 

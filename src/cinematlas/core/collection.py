@@ -31,6 +31,7 @@ from pymongo.operations import SearchIndexModel
 
 from ..exceptions import CinematlasError, DependencyError, SearchError
 from ..indexes import definition_drift, wait_until_queryable
+from .evaluate import EvalReport, mcnemar, normalize_questions, score
 from .loaders import Loader
 from .parts import EmbedInput, Joint, Part, as_joint, get_field
 from .results import Hit, Hits
@@ -43,6 +44,7 @@ DEFAULT_DB = "cinematlas"
 DIMENSIONS = 1024
 VECTOR_PATH = "embedding"
 MAX_CANDIDATES = 10_000
+RRF_K = 60
 _SENTENCE = re.compile(r"(?<=[.!?])\s+|\n+")
 
 Progress = Callable[[int, int], None]
@@ -107,11 +109,13 @@ class Atlas:
         filters: Sequence[str] = (),
         like: Loader | type[Loader] | None = None,
         display: Sequence[str] = (),
+        late: bool = False,
     ) -> Collection:
         """A searchable collection. ``name`` is ``"collection"`` or ``"db.collection"``.
 
         ``like=PDFPages`` borrows a loader's suggested ``embed``, ``moment``, ``key`` and ``filters``;
-        anything you pass explicitly wins.
+        anything you pass explicitly wins. ``late=True`` also stores one vector per part, so
+        :meth:`Collection.evaluate` can compare the joint vector with merged per-part rankings.
         """
         if like is not None:
             embed = embed or like.embed
@@ -122,7 +126,7 @@ class Atlas:
             raise ValueError("Say what to embed, e.g. embed=Text('title') + Image('photo'), or pass like=<Loader>.")
         db, _, coll = name.rpartition(".")
         return Collection(self, self.client[db or self.db][coll], as_joint(embed), moment=moment, key=key,
-                          filters=tuple(filters), display=tuple(display))
+                          filters=tuple(filters), display=tuple(display), late=late)
 
     def close(self) -> None:
         if self._owns_client:
@@ -139,7 +143,7 @@ class Collection:
     """Records with one joint vector each, searchable by text or image."""
 
     def __init__(self, atlas: Atlas, collection: Any, embed: Joint, *, moment: str | None, key: str | None,
-                 filters: tuple[str, ...], display: tuple[str, ...]):
+                 filters: tuple[str, ...], display: tuple[str, ...], late: bool = False):
         self.atlas = atlas
         self.mongo = collection
         self.embed = embed
@@ -148,6 +152,7 @@ class Collection:
         self.filters = filters
         self.display = display or tuple(f for f in ("title", "name", "source", key) if f)
         self.index_name = f"{collection.name}_joint"
+        self.late = late
 
     def __repr__(self) -> str:
         return f"<Collection {self.mongo.database.name}.{self.mongo.name} · {self.embed.describe()}>"
@@ -158,7 +163,10 @@ class Collection:
                                   "similarity": "cosine"}
         if quantization:
             vector["quantization"] = quantization
-        return {"fields": [vector, *({"type": "filter", "path": f} for f in self.filters)]}
+        fields = [vector]
+        if self.late:  # one vector per part, for the merged-rankings baseline
+            fields += [{**vector, "path": part_path(i)} for i in range(len(self.embed.parts))]
+        return {"fields": [*fields, *({"type": "filter", "path": f} for f in self.filters)]}
 
     def setup(self, *, wait: bool = True, timeout_s: float = 600) -> Collection:
         """Create (or update in place) the joint vector index. Safe to call every time."""
@@ -192,11 +200,23 @@ class Collection:
         def flush() -> None:
             nonlocal added, failed
             vectors, error = self._embed([inputs for _, inputs in batch], "document", retries)
+            part_vectors: list[dict[int, Any]] = [{} for _ in batch]
+            if vectors is not None and self.late:
+                slots = [(b, i, part.inputs(rec)) for b, (rec, _) in enumerate(batch)
+                         for i, part in enumerate(self.embed.parts)]
+                slots = [slot for slot in slots if slot[2]]
+                pv, error = self._embed([inputs for _, _, inputs in slots], "document", retries)
+                if pv is None:
+                    vectors = None
+                else:
+                    for (b, i, _), vec in zip(slots, pv, strict=True):
+                        part_vectors[b][i] = vec
             if vectors is None:
                 failed += len(batch)
                 errors.append(error or "embedding failed")
             else:
-                self._write([self._document(rec, vec) for (rec, _), vec in zip(batch, vectors, strict=True)])
+                self._write([self._document(rec, vec, parts) for (rec, _), vec, parts
+                             in zip(batch, vectors, part_vectors, strict=True)])
                 added += len(batch)
             batch.clear()
 
@@ -242,9 +262,12 @@ class Collection:
                     time.sleep(1.5**attempt)
         return None, error
 
-    def _document(self, record: Mapping[str, Any], vector: Sequence[float]) -> dict[str, Any]:
+    def _document(self, record: Mapping[str, Any], vector: Sequence[float],
+                  part_vectors: Mapping[int, Sequence[float]] | None = None) -> dict[str, Any]:
         doc = {k: v for k, v in record.items() if _storable(v)}
-        doc[VECTOR_PATH] = Binary.from_vector([float(x) for x in vector], BinaryVectorDtype.FLOAT32)
+        doc[VECTOR_PATH] = _bson_vector(vector)
+        for i, vec in (part_vectors or {}).items():
+            doc[part_path(i)] = _bson_vector(vec)
         if self.key:
             value = get_field(record, self.key)
             if value is None:
@@ -294,27 +317,82 @@ class Collection:
         inputs = _query_inputs(query)
         if not inputs:
             return Hits(display=self.display)
+        rows = self._vector_search(VECTOR_PATH, self._query_vector(inputs), k, where, candidates)
+        hits = Hits([Hit({**row, "rank": i}) for i, row in enumerate(rows, 1)], display=self.display)
+        text = " ".join(x for x in inputs if isinstance(x, str))
+        if moment and self.moment and self.atlas.rerank_model and text and hits:
+            self._attach_moments(text, hits)
+        return hits
+
+    def _query_vector(self, inputs: list[EmbedInput]) -> list[float]:
         vectors, error = self._embed([inputs], "query", retries=2)
         if vectors is None:
             raise SearchError(f"Could not embed the query: {error}")
-        stage: dict[str, Any] = {"index": self.index_name, "path": VECTOR_PATH, "queryVector": list(vectors[0]),
+        return list(vectors[0])
+
+    def _vector_search(self, path: str, vector: list[float], k: int, where: Mapping[str, Any] | None,
+                       candidates: int | None = None) -> list[dict[str, Any]]:
+        stage: dict[str, Any] = {"index": self.index_name, "path": path, "queryVector": vector,
                                  "numCandidates": min(candidates or max(k * 20, 100), MAX_CANDIDATES), "limit": k}
         if where:
             unknown = set(where) - set(self.filters)
             if unknown:
                 raise ValueError(f"Can only filter on {list(self.filters)} (declared filters); got {sorted(unknown)}")
             stage["filter"] = dict(where)
+        drop = {VECTOR_PATH: 0, **({part_path(i): 0 for i in range(len(self.embed.parts))} if self.late else {})}
         pipeline = [{"$vectorSearch": stage}, {"$addFields": {"score": {"$meta": "vectorSearchScore"}}},
-                    {"$project": {VECTOR_PATH: 0}}]
+                    {"$project": drop}]
         try:
-            rows = list(self.mongo.aggregate(pipeline))
+            return list(self.mongo.aggregate(pipeline))
         except PyMongoError as e:
             raise SearchError(f"Vector search failed on {self.index_name!r}: {e}. Did you run .setup()?") from e
-        hits = Hits([Hit({**row, "rank": i}) for i, row in enumerate(rows, 1)], display=self.display)
-        text = " ".join(x for x in inputs if isinstance(x, str))
-        if moment and self.moment and self.atlas.rerank_model and text and hits:
-            self._attach_moments(text, hits)
-        return hits
+
+    def search_merged(self, query: str | Part | Joint | Sequence[str | Part], k: int = 5, *,
+                      where: Mapping[str, Any] | None = None, depth: int = 50) -> Hits:
+        """The usual design, for comparison: search each part's own vector, merge with Reciprocal Rank Fusion.
+
+        Needs ``late=True``. Each hit's ``ranks`` shows its position in every part's list.
+        """
+        if not self.late:
+            raise CinematlasError("search_merged needs per-part vectors: create the collection with late=True.")
+        inputs = _query_inputs(query)
+        if not inputs:
+            return Hits(display=self.display)
+        vector = self._query_vector(inputs)
+        docs: dict[Any, dict[str, Any]] = {}
+        ranks: dict[Any, dict[str, int]] = {}
+        for i, part in enumerate(self.embed.parts):
+            for rank, row in enumerate(self._vector_search(part_path(i), vector, max(depth, k), where), 1):
+                ident = row.get("_key", row.get("_id"))
+                docs.setdefault(ident, row)
+                ranks.setdefault(ident, {})[f"{i}:{part!r}"] = rank
+        fused = sorted(ranks, key=lambda d: -sum(1 / (RRF_K + r) for r in ranks[d].values()))[:k]
+        return Hits([Hit({**docs[d], "score": sum(1 / (RRF_K + r) for r in ranks[d].values()),
+                          "ranks": ranks[d], "rank": n}) for n, d in enumerate(fused, 1)], display=self.display)
+
+    def evaluate(self, questions: Sequence[Mapping[str, Any]], k: int = 10, *,
+                 where: Mapping[str, Any] | None = None) -> EvalReport:
+        """Joint vector vs merged per-part rankings on your labelled questions, with a paired test.
+
+        Each question is ``{"q": <text, Image(...), or both>, "relevant": <key or list of keys>}``.
+        Needs ``late=True``. See :mod:`cinematlas.core.evaluate`.
+        """
+        items = normalize_questions(questions)
+        ident = (lambda h: h.get("_key")) if self.key else (lambda h: h.get("_id"))
+        joint, merged, rows = [], [], []
+        for query, relevant in items:
+            j = [ident(h) for h in self.search(query, k, where=where, moment=False)]
+            m = [ident(h) for h in self.search_merged(query, k, where=where)]
+            joint.append(j)
+            merged.append(m)
+            rows.append({"q": query if isinstance(query, str) else repr(query), "relevant": sorted(map(str, relevant)),
+                         "joint_top": j[:1], "merged_top": m[:1]})
+        rel = [r for _, r in items]
+        js, ms = score(joint, rel, k), score(merged, rel, k)
+        for row, a, b in zip(rows, js.correct, ms.correct, strict=True):
+            row["joint_correct"], row["merged_correct"] = a, b
+        a_only, b_only, p = mcnemar(js.correct, ms.correct)
+        return EvalReport(len(items), k, js, ms, a_only, b_only, p, rows)
 
     def _attach_moments(self, query: str, hits: Hits) -> None:
         """Rerank every sentence of the hits' moment field; each hit keeps its best. Order is unchanged."""
@@ -344,6 +422,14 @@ class Collection:
         """
         setattr(cls, fn.__name__, fn)
         return fn
+
+
+def part_path(i: int) -> str:
+    return f"{VECTOR_PATH}_part{i}"
+
+
+def _bson_vector(vector: Sequence[float]) -> Binary:
+    return Binary.from_vector([float(x) for x in vector], BinaryVectorDtype.FLOAT32)
 
 
 def split_sentences(value: Any, *, max_sentences: int = 60, max_chars: int = 500) -> list[str]:

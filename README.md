@@ -28,15 +28,16 @@ lists. That fails, because the lists disagree on every question that's about onl
 merging averages the disagreement away. Cinematlas embeds each scene's keyframe **and** its transcript
 into **one** vector, so there's nothing to reconcile.
 
-| Mean Hit@1 | First corpus | Held-out corpus |
-| --- | --- | --- |
-| merged rankings (rank fusion, tuned weights, reranked) | 0.65 | 0.21 |
-| **one joint image+speech vector** | **0.83** | **0.62** |
-| questions where exactly one wins (joint vs merged) | 14 vs 3, p = 0.013 | 40 vs 7, p < 0.001 |
+| Hit@1 | Video | Held-out video | Photos |
+| --- | --- | --- | --- |
+| merged rankings (one index per signal, rank fusion) | 0.65 | 0.21 | 0.62 |
+| **one joint vector per record** | **0.83** | **0.62** | **0.93** |
+| questions where exactly one wins (joint vs merged) | 14 vs 3, p = 0.013 | 40 vs 7, p < 0.001 | 25 vs 1, p < 0.001 |
 
-**It holds on video we never tuned on.** The held-out corpus is a different domain (a silent station
-tour, astronaut Q&A, science demos; 386 scenes, no burned-in captions), with 80 questions written by an
-AI agent that saw only the videos, never the code or results.
+**It holds on data we never tuned on.** The held-out video is a different domain (a silent station tour,
+astronaut Q&A, science demos; 386 scenes, no burned-in captions), and the photos (394 NASA photos with
+titles and descriptions) aren't video at all. Their 160 questions were written by an AI agent that saw
+only the media, never the code or results.
 
 **It isn't reading subtitles.** On the first corpus, where every frame has burned-in captions, cropping
 them made keyframes alone worse on speech (0.53 → 0.40) but left the joint vector intact (0.73 → 0.77).
@@ -44,11 +45,16 @@ them made keyframes alone worse on speech (0.53 → 0.40) but left the joint vec
 **So the default ranks with that one vector.** `search()` finds scenes with the joint vector and uses a
 sentence reranker only to pick the exact second. The router we built to rescue merged rankings ties it on
 both corpora (p = 1.0 and p = 0.69) at about twice the latency, so it's now opt-in. The two do differ: the
-default is better on questions about what was shown; routing leans ahead on what was said and lands on
-the exact second more often. If your users mostly ask about speech, pass `routing="adaptive"`.
+default is better on questions about what was shown; routing leans ahead on what was said. Both find
+the exact second equally well once they have the right scene. If your users mostly ask about speech,
+pass `routing="adaptive"`.
 
-[Full results, both corpora, caption ablation and limits](https://github.com/ranfysvalle02/cinematlas/blob/main/bench/RESULTS.md) ·
-[the story: fuse in the embedding, not in the ranking](https://github.com/ranfysvalle02/cinematlas/blob/main/blog.md).
+**It holds even when it shouldn't.** Pair each photo with *another* photo's text and early fusion does
+degrade (0.93 → 0.70), but merged rankings collapse (0.62 → 0.11): rank fusion needs a record's lists to
+agree. We predicted the opposite.
+
+[The paper: methods, predictions and limits](https://github.com/ranfysvalle02/cinematlas/blob/main/paper.md) · [full results](https://github.com/ranfysvalle02/cinematlas/blob/main/bench/RESULTS.md) ·
+[the story](https://github.com/ranfysvalle02/cinematlas/blob/main/blog.md).
 
 ---
 
@@ -105,9 +111,43 @@ photos.search(Image("mars.jpg"), where={"center": "JPL"})           # query by p
 That output is real: [`examples/photos.py`](https://github.com/ranfysvalle02/cinematlas/blob/main/examples/photos.py) indexes about 200 NASA photos and runs it.
 
 **Built in.** Parts: `Text` (labels, nested or computed fields, truncation) and `Image` (PIL, bytes,
-path or URL, downscaled to Voyage's limits). Loaders: `PDFPages` (each page's image and text; `pip install
-'cinematlas[pdf]'`), `ImageFolder` (images with same-named `.txt` captions) and `JSONLines`.
-`atlas.collection("decks", like=PDFPages)` borrows a loader's suggested setup.
+path or URL, downscaled to Voyage's limits). Loaders, each with a suggested setup you can borrow with
+`atlas.collection("decks", like=Slides)`:
+
+| Loader | One record per | Install |
+| --- | --- | --- |
+| `Slides("deck.pptx", pdf="deck.pdf")` | slide: title, body, **speaker notes**, and the rendered slide from its PDF export | `cinematlas[slides]` |
+| `Screenshots("shots/")` | screenshot, with its on-screen text read by OCR line by line | `cinematlas[ocr]` |
+| `PDFPages("paper.pdf")` | page: its image and text | `cinematlas[pdf]` |
+| `ImageFolder("photos/")` | image, with a caption from a same-named `.txt` | |
+| `JSONLines("rows.jsonl")` | line | |
+
+```python
+decks = atlas.collection("decks", like=Slides)
+decks.add(Slides("q3-review.pptx", pdf="q3-review.pdf"))
+decks.search("the slide where we showed Q3 churn").top.text    # the speaker-note sentence about churn
+
+shots = atlas.collection("shots", like=Screenshots)
+shots.add(Screenshots("qa-run-42/"))
+shots.search("the screen with the red error banner").top.text  # 'Payment failed: card declined'
+```
+
+**Check it on your own data.** Every vector library says its approach wins. Create the collection with
+`late=True` (it also stores one vector per part), label 30–50 questions, and `evaluate()` runs the joint
+vector against merged per-part rankings with the same paired test as the benchmarks:
+
+```python
+photos = atlas.collection("photos", embed=Text("title") + Image("image"), key="id", late=True)
+...
+print(photos.evaluate([{"q": "astronaut fixing a telescope", "relevant": ["sts082-717-029"]}, ...]))
+```
+```text
+                  Hit@1  Hit@10    MRR
+joint vector       0.93    0.99   0.95
+merged rankings    0.62    0.90   0.71
+
+The joint vector wins on your data: joint 0.93 vs merged 0.62 Hit@1 on 80 questions (25 vs 1 disputed, p = < 0.001).
+```
 
 **Extend it.** A part is anything that turns a record into text or images for the vector; a loader is
 anything that yields records:

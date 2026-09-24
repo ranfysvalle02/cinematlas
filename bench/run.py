@@ -196,7 +196,9 @@ def main() -> None:
         "",
         *caption_ablation(ablation),
         "",
-        *held_out(station, rows),
+        *held_out(station, rows, first_corpus=(auto, speech, t_speech)),
+        "",
+        *beyond_video(),
         "",
         "Reproduce: `uv run python bench/ingest.py`, then `--no-captions` and `--station`, then "
         "`uv run python bench/run.py` · "
@@ -217,7 +219,28 @@ HELD_OUT = {
 }
 
 
-def held_out(eng: Cinematlas, first: list[dict]) -> list[str]:
+def matched_moments(eng: Cinematlas, labels: list[dict], times: list[float | None]) -> tuple[int, int, int]:
+    """Moment accuracy compared fairly: only on questions where both methods found the right scene.
+
+    Moment@1 in the tables is measured on each method's own correct answers, which are different
+    questions, so the two numbers aren't comparable. Returns (both right, scene-first moments, routing moments).
+    """
+    def ok(hit: dict, label: dict, t: float | None) -> bool:
+        m = hit.get("moment")
+        if not m:
+            return False
+        return label["answer"].lower() in m["text"].lower() or (t is not None and abs(m["start"] - t) <= 3)
+
+    both = sf = ad = 0
+    for label, t in zip(labels, times, strict=True):
+        s = eng.search(label["q"], top_k=K, routing="scene")[:1]
+        a = eng.search(label["q"], top_k=K, routing="adaptive")[:1]
+        if s and a and relevant(s[0], label) and relevant(a[0], label):
+            both, sf, ad = both + 1, sf + ok(s[0], label, t), ad + ok(a[0], label, t)
+    return both, sf, ad
+
+
+def held_out(eng: Cinematlas, first: list[dict], first_corpus: tuple) -> list[str]:
     """A second corpus nobody tuned on: different domain, no burned-in captions, independently written questions."""
     speech = json.loads((HERE / "queries_station_speech.json").read_text())
     visual = json.loads((HERE / "queries_station_visual.json").read_text())
@@ -255,6 +278,8 @@ def held_out(eng: Cinematlas, first: list[dict]) -> list[str]:
             cw, cl, cp = mcnemar(a[cat]["per_q"], b[cat]["per_q"])
             split.append(f"| {corpus} | {cat} | {a[cat]['hit@1']:.2f} | {b[cat]['hit@1']:.2f} | {cw} | {cl} | "
                          f"{fmt_p(cp)} |")
+    m_both, m_sf, m_ad = matched_moments(eng, speech, t_speech)
+    f_both, f_sf_m, f_ad_m = matched_moments(*first_corpus)
     videos = sorted({lab.get("video") or lab["scenes"][0][0] for lab in speech + visual})
     scenes = eng.collection.count_documents({"status": "COMPLETED"})
     return [
@@ -278,15 +303,71 @@ def held_out(eng: Cinematlas, first: list[dict]) -> list[str]:
         verdict,
         "",
         "**Where scene-first and routing differ.** They tie overall, but not per category: scene-first is better on "
-        "questions about what was shown, routing leans ahead on what was said. Routing also lands on the exact "
-        f"second more often when it finds the right scene (Moment@1 {ad['speech']['moment@1']:.2f} vs "
-        f"{sf['speech']['moment@1']:.2f} here, {f_ad['speech']['moment@1']:.2f} vs "
-        f"{f_sf['speech']['moment@1']:.2f} on the first corpus). If your users mostly ask about speech, pass "
-        "`routing=\"adaptive\"`.",
+        "questions about what was shown, routing leans ahead on what was said. Finding the exact second is not "
+        "a difference: on the questions where both found the right scene, scene-first picked the right second "
+        f"{m_sf}/{m_both} times and routing {m_ad}/{m_both} here ({f_sf_m}/{f_both} and {f_ad_m}/{f_both} on the "
+        "first corpus). The Moment@1 columns above differ only because each method is scored on its own "
+        "correct answers. If your users mostly ask about speech, pass `routing=\"adaptive\"`.",
         "",
         "| Corpus | Questions | Scene-first | Routing | Scene-first only | Routing only | p |",
         "| --- | --- | --- | --- | --- | --- | --- |",
         *split,
+    ]
+
+
+def beyond_video() -> list[str]:
+    """Photos, via cinematlas.core's own evaluate(): the finding outside video, and where it stops."""
+    import photos
+
+    results = photos.evaluate()
+    table, kinds = [], []
+    for name, label in (("aligned", "aligned: each photo with its own title and description"),
+                        ("misaligned", "misaligned: each photo with another photo's title and description")):
+        r = results[name]["report"]
+        table.append(f"| {label} | {r.joint.hit1:.2f} | {r.merged.hit1:.2f} | {r.joint_only} | {r.merged_only} | "
+                     f"{fmt_p(r.p)} |")
+        for kind in ("visual", "text"):
+            k = results[name]["by_kind"][kind]
+            w, lo, p = k["split"]
+            kinds.append(f"| {name} | {kind} | {k['joint']:.2f} | {k['merged']:.2f} | {w} | {lo} | {fmt_p(p)} |")
+    a, m = results["aligned"]["report"], results["misaligned"]["report"]
+    return [
+        "## Beyond video: photos",
+        "",
+        f"{results['aligned']['n']} public-domain NASA photos across 16 topics ([corpus](photos_corpus.json)), each "
+        "embedded as `Text(title) + Text(description) + Image(photo)`. The joint vector is compared with merged "
+        "per-part rankings (Reciprocal Rank Fusion over one vector per part) using `Collection.evaluate()`, the same "
+        f"check users can run on their own data. {a.n} questions ([questions](queries_photos.json)), half about "
+        "what a photo shows and half about facts in its text, were written by an AI agent that saw only the photos "
+        "and their text, never the code or results.",
+        "",
+        "The misaligned collection is the boundary test: identical photos and text, but each photo is paired with "
+        "another photo's title and description, so the parts of a record no longer describe the same thing. "
+        "Predictions, recorded before these runs: the joint vector wins on aligned records, and its advantage "
+        "disappears on misaligned ones.",
+        "",
+        "| Collection | Joint Hit@1 | Merged Hit@1 | Joint only | Merged only | p |",
+        "| --- | --- | --- | --- | --- | --- |",
+        *table,
+        "",
+        "| Collection | Questions | Joint | Merged | Joint only | Merged only | p |",
+        "| --- | --- | --- | --- | --- | --- | --- |",
+        *kinds,
+        "",
+        f"Going from aligned to misaligned, the joint vector's Hit@1 changes by {m.joint.hit1 - a.joint.hit1:+.2f} "
+        f"and merged rankings' by {m.merged.hit1 - a.merged.hit1:+.2f}.",
+        "",
+        "**Predictions vs outcome.** First prediction (joint wins on aligned records): "
+        + ("held." if a.winner == "joint" else "did not hold.")
+        + " Second prediction (its advantage disappears on misaligned records): "
+        + ("held." if m.winner != "joint" else
+           "did not hold. Misalignment hurt merged rankings more than the joint vector: Reciprocal Rank Fusion "
+           "rewards records that rank well in every list, and once a record's parts describe different things "
+           "its lists stop agreeing. The joint vector did degrade, mostly on questions about the photo, which "
+           "two unrelated text parts now outweigh. Where merging rankings beats early fusion, if anywhere, is "
+           "still open; a smarter merge than RRF is the next thing to test."),
+        "",
+        "Reproduce: `uv run python bench/photos.py --ingest`, then `uv run python bench/run.py`.",
     ]
 
 

@@ -15,7 +15,8 @@ come from); see :mod:`cinematlas.core.registry`.
 """
 
 from .collection import AddResult, Atlas, Collection, split_sentences
-from .loaders import ImageFolder, JSONLines, Loader, PDFPages
+from .evaluate import EvalReport, mcnemar
+from .loaders import ImageFolder, JSONLines, Loader, PDFPages, Screenshots, Slides
 from .parts import Image, Joint, Part, Text, get_field, load_image
 from .registry import plugin, plugins
 from .results import Hit, Hits
@@ -24,6 +25,7 @@ __all__ = [
     "AddResult",
     "Atlas",
     "Collection",
+    "EvalReport",
     "Hit",
     "Hits",
     "Image",
@@ -33,9 +35,12 @@ __all__ = [
     "Loader",
     "PDFPages",
     "Part",
+    "Screenshots",
+    "Slides",
     "Text",
     "get_field",
     "load_image",
+    "mcnemar",
     "plugin",
     "plugins",
     "split_sentences",

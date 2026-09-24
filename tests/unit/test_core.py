@@ -374,3 +374,131 @@ def test_wait_until_searchable_polls_until_every_record_is_visible(atlas, mongo)
     seen = iter([[{}], [{}, {}, {}]])
     mongo.aggregate = lambda pipeline: next(seen)
     assert coll.wait_until_searchable(poll_s=0) is coll
+
+
+# ------------------------------------------------------------------ evaluate: joint vs merged on your data
+from cinematlas.core import mcnemar  # noqa: E402
+from cinematlas.core.evaluate import score  # noqa: E402
+
+
+class PathMongo(Mongo):
+    """$vectorSearch returns canned rows per vector path."""
+
+    def __init__(self, rows_by_path):
+        super().__init__()
+        self.rows_by_path = rows_by_path
+
+    def aggregate(self, pipeline):
+        self.pipelines.append(pipeline)
+        return iter([dict(r) for r in self.rows_by_path.get(pipeline[0]["$vectorSearch"]["path"], [])])
+
+
+def test_late_collections_index_and_store_one_vector_per_part(atlas, mongo):
+    coll = atlas.collection("photos", embed=Text("title") + Image("image"), key="id", late=True)
+    assert [f["path"] for f in coll.index_definition()["fields"]] == ["embedding", "embedding_part0",
+                                                                      "embedding_part1"]
+    coll.add([{"id": "a", "title": "t", "image": png()}, {"id": "b", "title": "only text"}])
+    a, b = mongo.docs
+    assert {"embedding", "embedding_part0", "embedding_part1"} <= set(a)
+    assert "embedding_part1" not in b  # no image, no image vector
+
+
+def test_merged_search_fuses_each_parts_ranking(voyage):
+    mongo = PathMongo({"embedding_part0": [{"_key": "x"}, {"_key": "y"}],
+                       "embedding_part1": [{"_key": "y"}, {"_key": "z"}]})
+    coll = Atlas(mongo_client=Client(mongo), voyage_client=voyage).collection(
+        "photos", embed=Text("title") + Image("image"), key="id", late=True)
+    hits = coll.search_merged("q", k=3)
+    assert [h["_key"] for h in hits] == ["y", "x", "z"]  # in both lists beats first in one
+    assert hits[0]["ranks"] == {"0:Text('title')": 2, "1:Image('image')": 1}
+
+
+def test_merged_search_needs_late_vectors(photos):
+    with pytest.raises(Exception, match="late=True"):
+        photos.search_merged("q")
+
+
+def test_evaluate_scores_both_methods_and_runs_the_paired_test(voyage):
+    mongo = PathMongo({"embedding": [{"_key": "right"}, {"_key": "wrong"}],
+                       "embedding_part0": [{"_key": "wrong"}], "embedding_part1": [{"_key": "wrong"}]})
+    coll = Atlas(mongo_client=Client(mongo), voyage_client=voyage).collection(
+        "photos", embed=Text("title") + Image("image"), key="id", late=True)
+    report = coll.evaluate([{"q": f"question {i}", "relevant": "right"} for i in range(8)], k=5)
+    assert (report.joint.hit1, report.merged.hit1) == (1.0, 0.0)
+    assert (report.joint_only, report.merged_only) == (8, 0) and report.p < 0.01 and report.winner == "joint"
+    assert "The joint vector wins on your data" in str(report) and len(report.rows) == 8
+
+
+def test_evaluate_says_when_there_is_no_real_difference_yet(voyage):
+    mongo = PathMongo({"embedding": [{"_key": "a"}], "embedding_part0": [{"_key": "a"}]})
+    coll = Atlas(mongo_client=Client(mongo), voyage_client=voyage).collection(
+        "photos", embed=Text("title"), key="id", late=True)
+    report = coll.evaluate([{"q": "x", "relevant": ["a", "b"]}])
+    assert report.winner is None and "Label more questions" in report.verdict()
+    with pytest.raises(ValueError, match="'q' and 'relevant'"):
+        coll.evaluate([{"query_text": "x"}])
+
+
+def test_paired_test_and_scoring_math():
+    assert mcnemar([True] * 10 + [False] * 5, [False] * 10 + [True] * 5) == (10, 5, pytest.approx(0.3017578125))
+    s = score([["a", "b"], ["c", "a"], ["x"]], [{"a"}, {"a"}, {"a"}], k=2)
+    assert (s.hit1, s.hitk, s.mrr) == (pytest.approx(1 / 3), pytest.approx(2 / 3), pytest.approx(0.5))
+
+
+def test_image_urls_with_spaces_are_encoded():
+    from cinematlas.core.parts import safe_url
+    assert safe_url("https://x.org/image/a b/a b~thumb.jpg") == "https://x.org/image/a%20b/a%20b~thumb.jpg"
+    assert safe_url("https://x.org/a%20b.jpg?w=1&h=2") == "https://x.org/a%20b.jpg?w=1&h=2"  # idempotent
+
+
+# ------------------------------------------------------------------ Slides and Screenshots plugins
+def test_slides_read_title_body_speaker_notes_and_the_pdf_image(tmp_path):
+    pptx = pytest.importorskip("pptx")
+    pymupdf = pytest.importorskip("pymupdf")
+    from cinematlas.core import Slides
+
+    deck = pptx.Presentation()
+    for title, body, notes in [("Q3 review", "Revenue up 12%", "Churn rose to 4.1% in September."),
+                               ("Roadmap", "Ship search v2", "")]:
+        slide = deck.slides.add_slide(deck.slide_layouts[1])
+        slide.shapes.title.text, slide.placeholders[1].text = title, body
+        if notes:
+            slide.notes_slide.notes_text_frame.text = notes
+    deck.save(tmp_path / "q3.pptx")
+    pdf = pymupdf.open()
+    for _ in range(2):
+        pdf.new_page()
+    pdf.save(tmp_path / "q3.pdf")
+
+    first, second = list(Slides(tmp_path / "q3.pptx", pdf=tmp_path / "q3.pdf"))
+    assert (first["title"], first["body"], first["notes"]) == ("Q3 review", "Revenue up 12%",
+                                                               "Churn rose to 4.1% in September.")
+    assert first["notes_and_body"].startswith("Churn rose") and isinstance(first["image"], PILImage.Image)
+    assert second["notes"] == "" and first["id"] == "q3.pptx#1"
+    inputs = Slides.embed.inputs(first)
+    assert inputs[:3] == ["Slide: Q3 review", "Revenue up 12%", "Speaker notes: Churn rose to 4.1% in September."]
+
+
+def test_screenshots_ocr_the_screen_into_lines(tmp_path):
+    pytest.importorskip("rapidocr_onnxruntime")
+    from PIL import ImageDraw, ImageFont
+
+    from cinematlas.core import Screenshots
+
+    img = PILImage.new("RGB", (640, 200), "white")
+    draw = ImageDraw.Draw(img)
+    draw.rectangle((0, 0, 640, 60), fill="red")
+    draw.text((20, 12), "Payment failed: card declined", fill="white", font=ImageFont.load_default(size=32))
+    draw.text((20, 110), "Settings", fill="black", font=ImageFont.load_default(size=32))
+    img.save(tmp_path / "billing-error.png")
+    (record,) = list(Screenshots(tmp_path))
+    lines = record["text"].splitlines()
+    assert lines[0].lower().startswith("payment failed") and "declined" in lines[0] and lines[1] == "Settings"
+
+
+def test_screenshots_without_ocr_embed_the_image_alone(tmp_path):
+    from cinematlas.core import Screenshots
+
+    (tmp_path / "a.png").write_bytes(png())
+    (record,) = list(Screenshots(tmp_path, ocr=False))
+    assert record["text"] is None and len(Screenshots.embed.inputs(record)) == 1
