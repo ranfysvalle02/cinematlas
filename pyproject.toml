@@ -1,6 +1,6 @@
 [project]
 name = "cinematlas"
-version = "0.5.1"
+version = "0.6.0"
 description = "Search inside video down to the second: one joint keyframe+speech vector per scene on MongoDB Atlas and Voyage AI, with sentence-level reranking."
 readme = "README.md"
 license = "MIT"
@@ -36,7 +36,8 @@ cinematlas = "cinematlas.cli:main"
 s3 = ["boto3>=1.28"]
 openai = ["openai>=1.0"]
 whisper = ["faster-whisper>=1.0"]                 # local STT, CPU-friendly, no PyTorch
-all = ["cinematlas[s3,openai,whisper]"]
+pdf = ["pymupdf>=1.24"]                           # cinematlas.core.PDFPages
+all = ["cinematlas[s3,openai,whisper,pdf]"]
 
 [project.urls]
 Homepage = "https://github.com/ranfysvalle02/cinematlas"
@@ -54,6 +55,7 @@ dev = [
     "moto[s3]>=5",
     "ruff>=0.6",
     "faster-whisper>=1.0",
+    "pymupdf>=1.24",
 ]
 
 [build-system]

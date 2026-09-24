@@ -81,17 +81,72 @@ Results are plain dicts underneath (`json.dumps` works). Cinematlas doesn't pick
 
 ---
 
+## Beyond video: `cinematlas.core`
+
+The finding isn't about video. Any records whose signals describe the same thing (product photos and
+titles, slides and their text, diagrams and captions) search better with one joint vector than with
+separate indexes merged afterwards. `cinematlas.core` is that idea as a small library:
+
+```python
+from cinematlas.core import Atlas, Text, Image
+
+photos = Atlas().collection("nasa.photos",
+    embed=Text("title") + Image("image"),      # parts compose into ONE joint vector
+    moment="description",                      # the reranker picks the best sentence
+    filters=["center"], key="nasa_id")         # filterable fields; re-adding a key replaces it
+photos.setup()                                 # the vector index; idempotent, updates in place
+photos.add(records)                            # any iterable of dicts, or a loader
+photos.wait_until_searchable()
+
+photos.search("astronaut fixing a telescope in space").top.title   # 'Making Room for Hubble's New Camera'
+photos.search(Image("mars.jpg"), where={"center": "JPL"})           # query by picture, filtered
+```
+
+That output is real: [`examples/photos.py`](https://github.com/ranfysvalle02/cinematlas/blob/main/examples/photos.py) indexes about 200 NASA photos and runs it.
+
+**Built in.** Parts: `Text` (labels, nested or computed fields, truncation) and `Image` (PIL, bytes,
+path or URL, downscaled to Voyage's limits). Loaders: `PDFPages` (each page's image and text; `pip install
+'cinematlas[pdf]'`), `ImageFolder` (images with same-named `.txt` captions) and `JSONLines`.
+`atlas.collection("decks", like=PDFPages)` borrows a loader's suggested setup.
+
+**Extend it.** A part is anything that turns a record into text or images for the vector; a loader is
+anything that yields records:
+
+```python
+from cinematlas.core import Part, Loader, Collection
+
+class Price(Part):                                   # numbers become words the model understands
+    def inputs(self, record):
+        return [f"costs ${record[self.field]:.0f}"] if record.get(self.field) else []
+
+class Tickets(Loader):                               # records from anywhere
+    key, moment = "id", "body"
+    embed = Text("subject") + Text("body")
+    def __iter__(self):
+        yield from my_helpdesk_api.tickets()
+
+@Collection.extend                                   # add methods to every collection, jQuery-style
+def newest(self, k=5):
+    return list(self.mongo.find({}, {"embedding": 0}).sort("_id", -1).limit(k))
+```
+
+Ship a plugin as a package with a `cinematlas.plugins` entry point, and `cinematlas.core.plugins()`
+lists it next to the built-ins.
+
+---
+
 ## Examples
 
-Four runnable scripts in [`examples/`](https://github.com/ranfysvalle02/cinematlas/tree/main/examples).
+Five runnable scripts in [`examples/`](https://github.com/ranfysvalle02/cinematlas/tree/main/examples).
 They need only `MONGODB_URI` and `VOYAGE_API_KEY` in `.env`. The first two search a demo corpus of six
-NASA interviews; the last two index your own video.
+NASA interviews, the next two index your own video, and the last one searches photos.
 
 ```bash
 uv run python examples/search.py "a little girl standing on hay bales"
 uv run python examples/search.py --adaptive "what did he say about his first flight?"
 uv run python examples/ask.py "What first got these people interested in aviation?"
 uv run python examples/index_and_search.py lecture.mp4 "when is the exam?"
+uv run python examples/photos.py "a rover's tracks on red sand" --center JPL
 ```
 
 | Example | What it does |
@@ -100,6 +155,7 @@ uv run python examples/index_and_search.py lecture.mp4 "when is the exam?"
 | [`ask.py`](https://github.com/ranfysvalle02/cinematlas/blob/main/examples/ask.py) | A cited answer from a local LLM ([Ollama](https://ollama.com), no API key), each citation a link to the exact second |
 | [`index_and_search.py`](https://github.com/ranfysvalle02/cinematlas/blob/main/examples/index_and_search.py) | Index any URL, YouTube link or file with live progress, then search it |
 | [`api.py`](https://github.com/ranfysvalle02/cinematlas/blob/main/examples/api.py) | A FastAPI service: `POST /videos` to upload, `GET /search` for deep links |
+| [`photos.py`](https://github.com/ranfysvalle02/cinematlas/blob/main/examples/photos.py) | `cinematlas.core` on about 200 NASA photos: search by text or by picture, filter by center |
 
 ---
 
