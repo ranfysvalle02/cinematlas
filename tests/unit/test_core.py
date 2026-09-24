@@ -527,3 +527,61 @@ def test_merged_search_and_evaluate_accept_a_fusion_choice(voyage):
     assert coll.evaluate([{"q": "q", "relevant": "x"}], fusion="max").merged.hit1 == 1.0
     with pytest.raises(ValueError, match="fusion must be one of"):
         coll.search_merged("q", fusion="magic")
+
+
+# ------------------------------------------------------------------ chunk= : fuse within a chunk, chunk across a record
+def test_split_chunks_packs_paragraphs_then_sentences_then_hard_cuts():
+    from cinematlas.core.parts import split_chunks
+
+    assert split_chunks("a.\n\nb.\n\nc.", 200) == ["a.\n\nb.\n\nc."]  # small paragraphs share a chunk
+    long = "One sentence here. " * 20
+    assert all(len(c) <= 100 for c in split_chunks(long, 100)) and len(split_chunks(long, 100)) > 3
+    assert split_chunks("x" * 250, 100) == ["x" * 100, "x" * 100, "x" * 50]
+
+
+def test_chunk_needs_a_key_and_a_top_level_field(atlas):
+    with pytest.raises(ValueError, match="needs key="):
+        atlas.collection("docs", embed=Text("body", chunk=500) + Image("cover"))
+    with pytest.raises(ValueError, match="top-level field"):
+        Text("a.b", chunk=500)
+    with pytest.raises(ValueError, match="at least 100"):
+        Text("body", chunk=10)
+
+
+class ChunkMongo(Mongo):
+    def delete_many(self, flt):
+        before = len(self.docs)
+        keep = lambda d: not (d.get("_parent") in flt["_parent"]["$in"] and d["_key"] not in flt["_key"]["$nin"]  # noqa: E731
+                              and d.get("_chunk", -1) >= flt["_chunk"]["$gte"])
+        self.docs = [d for d in self.docs if keep(d)]
+        return SimpleNamespace(deleted_count=before - len(self.docs))
+
+    def distinct(self, key, flt):
+        return sorted({d.get(key) for d in self.docs})
+
+
+def test_each_chunk_is_embedded_with_the_records_other_parts(voyage, monkeypatch):
+    monkeypatch.setattr(core_collection.time, "sleep", lambda _s: None)
+    mongo = ChunkMongo()
+    coll = Atlas(mongo_client=Client(mongo), voyage_client=voyage).collection(
+        "docs", embed=Text("title") + Text("body", chunk=100) + Image("cover"), key="id")
+    body = "\n\n".join(f"Paragraph {i}. " + "words " * 12 for i in range(3))
+    assert coll.add([{"id": "m1", "title": "Manual", "body": body, "cover": png()}]).added == 3
+    assert [d["_key"] for d in mongo.docs] == ["m1#0", "m1#1", "m1#2"] and {d["_parent"] for d in mongo.docs} == {"m1"}
+    (_, _, inputs), = voyage.calls
+    assert all(len(i) == 3 and i[0] == "Manual" and not isinstance(i[2], str) for i in inputs)  # title + chunk + cover
+    assert "_parent" in [f["path"] for f in coll.index_definition()["fields"]] and coll.count() == 1
+
+    coll.add([{"id": "m1", "title": "Manual", "body": "Short now.", "cover": png()}])  # fewer chunks: leftovers go
+    assert [d["_key"] for d in mongo.docs] == ["m1#0"]
+
+
+def test_chunked_search_returns_each_records_best_chunk_once(voyage):
+    rows = [{"_key": "a#2", "_parent": "a", "_chunk": 2, "body": "the answer", "score": 0.9},
+            {"_key": "a#0", "_parent": "a", "_chunk": 0, "body": "intro", "score": 0.8},
+            {"_key": "b#1", "_parent": "b", "_chunk": 1, "body": "other", "score": 0.7}]
+    coll = Atlas(mongo_client=Client(Mongo(rows)), voyage_client=voyage).collection(
+        "docs", embed=Text("body", chunk=500), key="id", moment="body")
+    hits = coll.search("the answer", k=2)
+    assert [(h["_key"], h["chunk"]) for h in hits] == [("a", 2), ("b", 1)]
+    assert hits[0].text == "the answer"  # the matching chunk is the moment

@@ -7,24 +7,24 @@ Corpus: 6 NASA *The Quiet Crew* interviews (65 scenes; one program, one topic, o
 
 | Configuration | Speech Hit@1 | Visual Hit@1 | **Mean Hit@1** | Speech MRR | Visual MRR | Moment@1 | p50 |
 | --- | --- | --- | --- | --- | --- | --- | --- |
-| visual only (keyframes) | 0.53 | 0.90 | **0.72** | 0.603 | 0.925 | — | 375 ms |
-| joint vector only (image+speech) | 0.73 | 0.93 | **0.83** | 0.801 | 0.956 | — | 98 ms |
-| full-text only (Atlas Search BM25) | 0.60 | 0.30 | **0.45** | 0.652 | 0.360 | — | 86 ms |
-| transcript only · autoEmbed voyage-4 | 0.83 | 0.23 | **0.53** | 0.886 | 0.365 | — | 190 ms |
-| transcript only · client voyage-4 | 0.83 | 0.20 | **0.52** | 0.886 | 0.347 | — | 351 ms |
-| transcript only · client, voyage-4-lite queries | 0.83 | 0.23 | **0.53** | 0.889 | 0.364 | — | 361 ms |
-| transcript + rerank | 0.90 | 0.43 | **0.67** | 0.937 | 0.522 | 0.78 | 597 ms |
-| fixed fusion, equal weights, no rerank | 0.57 | 0.57 | **0.57** | 0.727 | 0.672 | 0.57 | 230 ms |
-| fixed fusion, equal weights + rerank | 0.70 | 0.57 | **0.63** | 0.799 | 0.661 | 0.71 | 619 ms |
-| fixed fusion, tuned weights + rerank | 0.80 | 0.50 | **0.65** | 0.853 | 0.600 | 0.75 | 608 ms |
-| adaptive routing · autoEmbed | 0.83 | 0.80 | **0.82** | 0.888 | 0.850 | 0.76 | 606 ms |
-| **scene-first (default)**: joint vector ranks, reranker picks the second | 0.73 | 0.93 | **0.83** | 0.801 | 0.956 | 0.73 | 382 ms |
-| adaptive · client-side fusion | 0.83 | 0.80 | **0.82** | 0.888 | 0.850 | 0.76 | 1257 ms |
-| adaptive · client transcript mode | 0.83 | 0.80 | **0.82** | 0.888 | 0.850 | 0.76 | 850 ms |
+| visual only (keyframes) | 0.53 | 0.90 | **0.72** | 0.603 | 0.925 | — | 296 ms |
+| joint vector only (image+speech) | 0.73 | 0.93 | **0.83** | 0.801 | 0.956 | — | 66 ms |
+| full-text only (Atlas Search BM25) | 0.60 | 0.30 | **0.45** | 0.652 | 0.360 | — | 59 ms |
+| transcript only · autoEmbed voyage-4 | 0.83 | 0.23 | **0.53** | 0.886 | 0.364 | — | 126 ms |
+| transcript only · client voyage-4 | 0.83 | 0.20 | **0.52** | 0.886 | 0.347 | — | 261 ms |
+| transcript only · client, voyage-4-lite queries | 0.83 | 0.23 | **0.53** | 0.889 | 0.366 | — | 264 ms |
+| transcript + rerank | 0.90 | 0.43 | **0.67** | 0.937 | 0.522 | 0.78 | 438 ms |
+| fixed fusion, equal weights, no rerank | 0.57 | 0.57 | **0.57** | 0.727 | 0.672 | 0.57 | 182 ms |
+| fixed fusion, equal weights + rerank | 0.70 | 0.57 | **0.63** | 0.799 | 0.661 | 0.71 | 466 ms |
+| fixed fusion, tuned weights + rerank | 0.80 | 0.50 | **0.65** | 0.853 | 0.600 | 0.75 | 471 ms |
+| adaptive routing · autoEmbed | 0.83 | 0.80 | **0.82** | 0.888 | 0.850 | 0.76 | 462 ms |
+| **scene-first (default)**: joint vector ranks, reranker picks the second | 0.73 | 0.93 | **0.83** | 0.801 | 0.956 | 0.73 | 246 ms |
+| adaptive · client-side fusion | 0.83 | 0.80 | **0.82** | 0.888 | 0.850 | 0.76 | 923 ms |
+| adaptive · client transcript mode | 0.83 | 0.80 | **0.82** | 0.888 | 0.850 | 0.76 | 659 ms |
 
 *Moment@1*: among top-1 speech hits, the returned moment contains the answer or starts within 3 s of it. Latency is the speech-set p50 from a laptop over the internet, including Voyage calls. Hybrid runs as one native `$rankFusion` query unless marked client-side; reranking runs as native `$rerank`. Vector indexes use scalar quantization; vectors are stored as BSON float32.
 
-**Reading this table.** One joint image+speech vector per scene (mean 0.83) beats fusing the same signals after retrieval (best tuned fusion 0.65): it wins 14 questions the fusion misses and loses 3 (exact McNemar p = 0.013). Separate lists disagree on every question that is about only one of the two, and rank fusion averages the disagreement away; a joint vector never produces it. The default, scene-first, ranks with that vector and uses the reranker only to pick the second (Moment@1 0.73), in 382 ms. Adaptive routing, which repairs late fusion by choosing a specialist per question, ties it (4 vs 3, p = 1.000) at 606 ms: it leans ahead on questions about what was said, behind on what was shown.
+**Reading this table.** One joint image+speech vector per scene (mean 0.83) beats fusing the same signals after retrieval (best tuned fusion 0.65): it wins 14 questions the fusion misses and loses 3 (exact McNemar p = 0.013). Separate lists disagree on every question that is about only one of the two, and rank fusion averages the disagreement away; a joint vector never produces it. The default, scene-first, ranks with that vector and uses the reranker only to pick the second (Moment@1 0.73), in 246 ms. Adaptive routing, which repairs late fusion by choosing a specialist per question, ties it (4 vs 3, p = 1.000) at 462 ms: it leans ahead on questions about what was said, behind on what was shown.
 
 **Limits.** 60 questions over 6 videos from one program, written by the authors; one question is 3.3 points, so only gaps confirmed by the paired test count. Weights and routing thresholds were tuned on this set, which is why the held-out corpus below exists. Latency is one laptop to one cloud region, comparative only.
 
@@ -54,12 +54,12 @@ Without captions, keyframes alone lose speech questions (0.53 → 0.40): pixels 
 
 | Configuration | Speech Hit@1 | Visual Hit@1 | Mean Hit@1 | Moment@1 | p50 |
 | --- | --- | --- | --- | --- | --- |
-| keyframes only | 0.12 | 0.88 | **0.50** | — | 108 ms |
-| transcript + rerank | 0.55 | 0.07 | **0.31** | 0.86 | 454 ms |
-| rank fusion, tuned weights + rerank | 0.33 | 0.10 | **0.21** | 0.85 | 592 ms |
-| joint vector only | 0.35 | 0.90 | **0.62** | — | 94 ms |
-| adaptive routing | 0.50 | 0.68 | **0.59** | 0.85 | 575 ms |
-| scene-first | 0.35 | 0.90 | **0.62** | 0.71 | 340 ms |
+| keyframes only | 0.12 | 0.88 | **0.50** | — | 105 ms |
+| transcript + rerank | 0.55 | 0.07 | **0.31** | 0.86 | 371 ms |
+| rank fusion, tuned weights + rerank | 0.33 | 0.10 | **0.21** | 0.85 | 488 ms |
+| joint vector only | 0.35 | 0.90 | **0.62** | — | 68 ms |
+| adaptive routing | 0.50 | 0.68 | **0.59** | 0.85 | 504 ms |
+| scene-first | 0.35 | 0.90 | **0.62** | 0.71 | 278 ms |
 
 | Paired comparison | A right, B wrong | B right, A wrong | p |
 | --- | --- | --- | --- |
@@ -67,7 +67,7 @@ Without captions, keyframes alone lose speech questions (0.53 → 0.40): pixels 
 | scene-first vs adaptive routing | 14 | 11 | 0.690 |
 | joint vector only vs adaptive routing | 14 | 11 | 0.690 |
 
-**Decision rule, fixed before this corpus was run:** scene-first becomes the default if it is not significantly worse than adaptive routing on either corpus and it is faster. On this corpus it is not significantly worse (14 vs 11, p = 0.690) and faster (340 vs 575 ms).
+**Decision rule, fixed before this corpus was run:** scene-first becomes the default if it is not significantly worse than adaptive routing on either corpus and it is faster. On this corpus it is not significantly worse (14 vs 11, p = 0.690) and faster (278 vs 504 ms).
 
 **Where scene-first and routing differ.** They tie overall, but not per category: scene-first is better on questions about what was shown, routing leans ahead on what was said. Finding the exact second is not a difference: on the questions where both found the right scene, scene-first picked the right second 6/9 times and routing 6/9 here (16/22 and 17/22 on the first corpus). The Moment@1 columns above differ only because each method is scored on its own correct answers. If your users mostly ask about speech, pass `routing="adaptive"`.
 
@@ -119,5 +119,30 @@ Merged rankings above use Reciprocal Rank Fusion. Here every signal's own index 
 **No real merge beats the joint vector on any corpus.** It is ahead in all 20 comparisons, significantly in 17. Of the gap between the best real merge and the oracle, the joint vector closes 58% (video (interviews)), 43% (held-out video (station)), 71% (photos, aligned), 50% (photos, misaligned).
 
 **Predictions vs outcome** (recorded before this run). Score-based merges beat RRF but none beats the joint vector: mostly held; they beat RRF in 15 of 16 cases and none beats the joint vector. CombMAX ties or beats the joint vector on misaligned photos: did not hold (0.38 vs 0.70). The oracle beats the joint vector everywhere: it's ahead on every corpus, significantly on held-out video (station), photos, misaligned. That remaining gap is what perfect per-question routing could still add on top of early fusion.
+
+## Where early fusion loses
+
+Two controlled tests on the photo corpus and its 80 questions ([boundary.py](boundary.py)). Cells: Hit@1 (visual / text questions), and against the joint vector: questions only it got right vs only the method got right, exact McNemar p.
+
+**B1: a single unrelated part.** Each record is `Text(description) + Image(photo)`, one part each, with the photo's own description (aligned) or another photo's (misaligned). This removes the two-texts-vs-one-photo imbalance of the earlier misaligned test.
+
+| Method | single part, aligned | single part, misaligned |
+| --- | --- | --- |
+| joint vector | **0.93 (0.88 / 0.97)** | **0.70 (0.47 / 0.93)** |
+| merged (rrf) | 0.62 (0.68 / 0.57), 26 vs 2, p < 0.001 | 0.11 (0.10 / 0.12), 51 vs 4, p < 0.001 |
+| merged (sum) | 0.78 (0.78 / 0.78), 14 vs 2, p 0.004 | 0.39 (0.12 / 0.65), 30 vs 5, p < 0.001 |
+
+**B2: long records.** Each record is `Text(body) + Image(photo)`, the body being the photo's own description buried among 0, 7 or 31 descriptions of NASA photos from outside the corpus ([distractors](distractors.json)), so every answer stays unique. Chunked late fusion gets the ideal chunking: one vector per description, a record scored by its best chunk, merged with the photo's vector. Unchunked late fusion merges one whole-body vector with the photo's.
+
+| Method | long text, 1 description | long text, 8 descriptions | long text, 32 descriptions |
+| --- | --- | --- | --- |
+| joint vector | **0.93 (0.88 / 0.97)** | **0.59 (0.60 / 0.57)** | **0.54 (0.55 / 0.53)** |
+| chunked late (rrf) | 0.64 (0.72 / 0.55), 25 vs 2, p < 0.001 | 0.62 (0.75 / 0.50), 14 vs 17, p 0.720 | 0.61 (0.68 / 0.55), 14 vs 20, p 0.392 |
+| chunked late (sum) | 0.75 (0.78 / 0.72), 16 vs 2, p 0.001 | 0.82 (0.75 / 0.90), 3 vs 22, p < 0.001 | 0.81 (0.72 / 0.90), 4 vs 26, p < 0.001 |
+| unchunked late (sum) | 0.76 (0.78 / 0.75), 15 vs 2, p 0.002 | 0.55 (0.53 / 0.57), 12 vs 9, p 0.664 | 0.40 (0.42 / 0.38), 16 vs 5, p 0.027 |
+| chunk-level joint | — | 0.93 (0.88 / 0.97), 1 vs 28, p < 0.001 | 0.94 (0.90 / 0.97), 0 vs 32, p < 0.001 |
+| Text(chunk=1600), the library | — | — | 0.74 (0.78 / 0.70), 8 vs 24, p 0.007 |
+
+**Predictions vs outcome** (recorded before these runs). The joint vector still wins with one unrelated part but loses to CombSUM on visual questions: did not hold; it wins overall and on visual questions (0.47 vs 0.12). On long records, chunked late fusion beats the joint vector significantly: held, on long text, 8 descriptions, long text, 32 descriptions. This is the boundary: one vector per record stops working when a part is long enough that the relevant passage is a small share of it, and the long text also drowns out the photo (the joint vector's visual accuracy falls with length though the photo never changes). Chunk-level fusion (the photo embedded together with each chunk, a record scoring its best chunk), predicted after seeing B2 to beat chunked late fusion and recover visual accuracy to 0.80 or more: long text, 8 descriptions: 0.93 vs chunked late 0.82 (11 vs 3, p 0.057), visual 0.88; long text, 32 descriptions: 0.94 vs chunked late 0.81 (12 vs 2, p 0.013), visual 0.90.
 
 Reproduce: `uv run python bench/ingest.py`, then `--no-captions` and `--station`, then `uv run python bench/run.py` · generated 2026-09-24

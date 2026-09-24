@@ -34,7 +34,7 @@ from ..indexes import definition_drift, wait_until_queryable
 from .evaluate import EvalReport, mcnemar, normalize_questions, score
 from .fusion import MERGES
 from .loaders import Loader
-from .parts import EmbedInput, Joint, Part, as_joint, get_field
+from .parts import EmbedInput, Joint, Part, as_joint, get_field, split_chunks
 from .results import Hit, Hits
 
 logger = logging.getLogger("cinematlas")
@@ -153,6 +153,9 @@ class Collection:
         self.display = display or tuple(f for f in ("title", "name", "source", key) if f)
         self.index_name = f"{collection.name}_joint"
         self.late = late
+        self.chunked = embed.chunked
+        if self.chunked and not key:
+            raise ValueError("chunk= needs key=, so a record's chunks can be grouped and replaced together")
 
     def __repr__(self) -> str:
         return f"<Collection {self.mongo.database.name}.{self.mongo.name} · {self.embed.describe()}>"
@@ -166,7 +169,8 @@ class Collection:
         fields = [vector]
         if self.late:  # one vector per part, for the merged-rankings baseline
             fields += [{**vector, "path": part_path(i)} for i in range(len(self.embed.parts))]
-        return {"fields": [*fields, *({"type": "filter", "path": f} for f in self.filters)]}
+        filters = [*self.filters, *(["_parent"] if self.chunked else [])]
+        return {"fields": [*fields, *({"type": "filter", "path": f} for f in filters)]}
 
     def setup(self, *, wait: bool = True, timeout_s: float = 600) -> Collection:
         """Create (or update in place) the joint vector index. Safe to call every time."""
@@ -220,7 +224,7 @@ class Collection:
                 added += len(batch)
             batch.clear()
 
-        for record in records:
+        for record in self._expand(records):
             try:
                 inputs = self.embed.inputs(record)
             except Exception as e:  # an unreadable image or bad field fails this record, not the whole add
@@ -242,6 +246,19 @@ class Collection:
         if batch:
             flush()
         return AddResult(added, skipped, failed, time.monotonic() - t0, errors)
+
+    def _expand(self, records: Iterable[Mapping[str, Any]]) -> Iterable[Mapping[str, Any]]:
+        """With a chunked part, one record per chunk; each chunk keeps every other field of its record."""
+        if not self.chunked:
+            yield from records
+            return
+        field_name, size = self.chunked.field, self.chunked.chunk
+        for record in records:
+            text = record.get(field_name)
+            pieces = split_chunks(str(text), size) if text else [None]
+            parent = get_field(record, self.key)
+            for i, piece in enumerate(pieces):
+                yield {**record, field_name: piece, "_parent": parent, "_chunk": i}
 
     def _label(self, record: Mapping[str, Any]) -> str:
         return str(get_field(record, self.key) if self.key else next(iter(record.values()), "?"))[:80]
@@ -272,12 +289,16 @@ class Collection:
             value = get_field(record, self.key)
             if value is None:
                 raise CinematlasError(f"Record has no {self.key!r} (the collection's key): {list(record)[:8]}")
-            doc["_key"] = value
+            doc["_key"] = f"{value}#{record['_chunk']}" if "_chunk" in record else value
         return doc
 
     def _write(self, docs: list[dict[str, Any]]) -> None:
         if self.key:
             self.mongo.bulk_write([ReplaceOne({"_key": d["_key"]}, d, upsert=True) for d in docs], ordered=False)
+            if self.chunked:  # a re-added record may now have fewer chunks: drop the leftovers
+                parents = {d["_parent"] for d in docs}
+                self.mongo.delete_many({"_parent": {"$in": list(parents)}, "_key": {"$nin": [d["_key"] for d in docs]},
+                                        "_chunk": {"$gte": min(d["_chunk"] for d in docs)}})
         else:
             self.mongo.insert_many(docs)
 
@@ -301,6 +322,9 @@ class Collection:
         return self.mongo.delete_many(dict(where or {})).deleted_count
 
     def count(self, where: Mapping[str, Any] | None = None) -> int:
+        """Number of records (not chunks) matching ``where``."""
+        if self.chunked:
+            return len(self.mongo.distinct("_parent", dict(where or {})))
         return self.mongo.count_documents(dict(where or {}))
 
     # ------------------------------------------------------------------ reading
@@ -317,12 +341,27 @@ class Collection:
         inputs = _query_inputs(query)
         if not inputs:
             return Hits(display=self.display)
-        rows = self._vector_search(VECTOR_PATH, self._query_vector(inputs), k, where, candidates)
+        fetch = min(k * 8, MAX_CANDIDATES) if self.chunked else k
+        rows = self._best_per_record(self._vector_search(VECTOR_PATH, self._query_vector(inputs), fetch, where,
+                                                         candidates))[:k]
         hits = Hits([Hit({**row, "rank": i}) for i, row in enumerate(rows, 1)], display=self.display)
         text = " ".join(x for x in inputs if isinstance(x, str))
         if moment and self.moment and self.atlas.rerank_model and text and hits:
             self._attach_moments(text, hits)
         return hits
+
+    def _best_per_record(self, rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        """Chunked collections: keep each record's best chunk, reported under the record's key."""
+        if not self.chunked:
+            return rows
+        seen, out = set(), []
+        for row in rows:
+            parent = row.get("_parent")
+            if parent in seen:
+                continue
+            seen.add(parent)
+            out.append({**row, "_key": parent, "chunk": row.get("_chunk")})
+        return out
 
     def _query_vector(self, inputs: list[EmbedInput]) -> list[float]:
         vectors, error = self._embed([inputs], "query", retries=2)
@@ -369,7 +408,8 @@ class Collection:
         lists: dict[str, list[tuple[Any, float]]] = {}
         for i, part in enumerate(self.embed.parts):
             name = f"{i}:{part!r}"
-            rows = self._vector_search(part_path(i), vector, max(depth, k), where)
+            rows = self._best_per_record(self._vector_search(part_path(i), vector, max(depth, k) * (
+                8 if self.chunked else 1), where))
             lists[name] = [(row.get("_key", row.get("_id")), float(row.get("score") or 0)) for row in rows]
             for rank, row in enumerate(rows, 1):
                 ident = row.get("_key", row.get("_id"))

@@ -18,36 +18,44 @@ cinematlas search "how loud is a sonic boom?"
 
 ---
 
-## The finding: fuse in the embedding, not in the ranking
+## The finding: fuse within a unit, chunk across units
 
-A record usually carries several signals about the same thing: a scene's picture and speech, a photo and
-its caption. The standard design gives each signal its own index and merges the ranked lists afterwards.
-That loses: on any question about only one signal, the lists disagree, and merging averages the right
-answer away. Cinematlas embeds a record's signals **together, into one vector**, so there's nothing to
-reconcile.
+A record carries several signals about the same thing: a scene's picture and speech, a photo and its
+caption. The standard design gives each signal its own index and merges the ranked lists. That loses:
+on any question about one signal, the lists disagree, and merging averages the right answer away.
+
+**Fuse.** Embed a record's signals together, into one vector.
 
 | Hit@1 | Video | Held-out video | Photos |
 | --- | --- | --- | --- |
-| merged rankings (rank fusion; on video also tuned weights + reranker) | 0.65 | 0.21 | 0.62 |
+| merged rankings, as usually built | 0.65 | 0.21 | 0.62 |
 | best of five merges, incl. learned weights | 0.72 | 0.50 | 0.78 |
 | **one joint vector per record** | **0.83** | **0.62** | **0.93** |
-| joint vs merged, questions only one got right | 14 vs 3, p = 0.013 | 40 vs 7, p < 0.001 | 25 vs 1, p < 0.001 |
 
-- **On data nobody tuned on.** The held-out video (a different domain, no burned-in captions) and the
-  photos (not video at all) have 160 questions written by an AI agent that never saw the code or results.
-- **Not by reading subtitles.** Cropping burned-in captions hurt keyframes alone (0.53 → 0.40 on speech),
-  not the joint vector (0.73 → 0.77).
-- **Even when the parts disagree.** Pair each photo with another photo's text: the joint vector drops to
-  0.70, merged rankings to 0.11. We predicted the reverse.
-- **Close to the ceiling.** An oracle that sends each question to its best signal, knowing the answer,
-  bounds what routing could reach. The joint vector covers 43–71% of the distance from the best merge to it.
+It wins on data nobody tuned on (160 questions written blind by an AI agent), isn't reading burned-in
+subtitles, and wins even when a record's parts describe different things (0.70 vs 0.11).
 
-**So `search()` ranks with the joint vector** and uses a reranker only to pick the exact second. Adaptive
-routing, built to rescue merged rankings, ties it at twice the latency. It leans ahead on questions about
-what was said and behind on what was shown; pass `routing="adaptive"` if your users mostly ask about speech.
+**Chunk.** One vector per record breaks when a part is long. Bury each photo's description among 31
+others and the joint vector falls below chunked late fusion; the long text even drowns out the photo.
+Embed the photo together with *each chunk* instead:
 
-[Paper: methods, seven predictions, limits](https://github.com/ranfysvalle02/cinematlas/blob/main/paper.md) · [every table](https://github.com/ranfysvalle02/cinematlas/blob/main/bench/RESULTS.md) ·
-[the story](https://github.com/ranfysvalle02/cinematlas/blob/main/blog.md)
+| Hit@1, answer is 1/32 of the text | |
+| --- | --- |
+| one joint vector per record | 0.54 |
+| chunked late fusion (ideal chunk boundaries) | 0.81 |
+| **the photo fused into each chunk** (ideal boundaries) | **0.94** |
+| the same with the library's own chunker, `Text("body", chunk=1600)` | 0.74 |
+
+Chunk boundaries matter: the real chunker beats one vector per record (24 vs 8, p = 0.007) and ties
+late fusion's ideal chunks, but 1,600-character chunks often hold two passages, diluting the answer.
+
+Both come with paired significance tests and ten predictions written down before each run, four of
+which failed. [Paper](https://github.com/ranfysvalle02/cinematlas/blob/main/paper.md) · [every table](https://github.com/ranfysvalle02/cinematlas/blob/main/bench/RESULTS.md) · [the story](https://github.com/ranfysvalle02/cinematlas/blob/main/blog.md)
+
+**In the library:** video `search()` ranks scenes with the joint vector and uses a reranker only to pick
+the exact second (`routing="adaptive"` leans ahead on speech questions, at twice the latency).
+`cinematlas.core` applies both halves to any records: `Text("title") + Image("photo")` to fuse,
+`Text("body", chunk=…)` to chunk.
 
 ---
 
@@ -103,8 +111,18 @@ photos.search(Image("mars.jpg"), where={"center": "JPL"})           # query by p
 
 That output is real: [`examples/photos.py`](https://github.com/ranfysvalle02/cinematlas/blob/main/examples/photos.py) indexes about 200 NASA photos and runs it.
 
-**Built in.** Parts: `Text` (labels, nested or computed fields, truncation) and `Image` (PIL, bytes,
-path or URL, downscaled to Voyage's limits). Loaders, each with a suggested setup you can borrow with
+**Long text? Chunk it, fused.** `Text("body", chunk=800)` splits long text into pieces of up to that many
+characters and embeds each piece *together with the record's other parts*; search keeps each record's best
+piece and returns it as the moment. Smaller chunks, closer to one idea each, did better in our tests:
+
+```python
+manuals = atlas.collection("manuals", embed=Text("title") + Text("body", chunk=800) + Image("cover"),
+                           key="id", moment="body")
+manuals.search("how do I reset the pressure valve?").top.text   # the passage that answers
+```
+
+**Built in.** Parts: `Text` (labels, nested or computed fields, truncation, `chunk=`) and `Image` (PIL,
+bytes, path or URL, downscaled to Voyage's limits). Loaders, each with a suggested setup you can borrow with
 `atlas.collection("decks", like=Slides)`:
 
 | Loader | One record per | Install |

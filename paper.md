@@ -1,6 +1,6 @@
 # Fuse in the embedding, not in the ranking
 
-**Early vs late fusion for multimodal retrieval: three corpora, seven pre-stated predictions**
+**Early vs late fusion for multimodal retrieval: three corpora, ten pre-stated predictions, one boundary**
 
 *Cinematlas project · September 2026 · all code, corpora, questions and results:
 [github.com/ranfysvalle02/cinematlas](https://github.com/ranfysvalle02/cinematlas)*
@@ -19,8 +19,11 @@ and cross-validated weights all lose to the joint vector, which instead recovers
 between the best merge and an oracle that routes each question to its best signal. Two predictions we expected to limit the finding did not hold. Removing burned-in
 captions did not hurt the joint vector, and pairing each photo with unrelated text hurt late fusion more
 than early fusion (−0.51 vs −0.23 Hit@1), because rank fusion depends on the separate lists agreeing.
-A previously reported gap in exact-moment accuracy between two systems turned out to be a measurement
-artifact.
+We then found the boundary: when one signal is long, one vector per record loses to chunked late fusion
+(0.54 vs 0.81 Hit@1 with the answer 1/32 of the text), and the long text also drowns out the image. Fusing
+at chunk granularity, embedding the image together with each chunk, restores it (0.94). The rule that
+survives: fuse within a unit, chunk across units. A previously reported gap in exact-moment accuracy turned
+out to be a measurement artifact.
 
 ## 1. Question
 
@@ -78,6 +81,12 @@ or starts within 3 s of it.
 6. On misaligned photos, CombMAX, which needs no agreement between lists, ties or beats the joint vector.
 7. An oracle that picks each question's best single signal (knowing the answer) beats the joint vector
    on every corpus.
+8. With a single unrelated part (one text, one image), the joint vector still wins overall but loses to
+   CombSUM on visual questions.
+9. As records grow long (the answer 1/8, then 1/32 of the text), chunked late fusion overtakes the joint
+   vector significantly.
+10. *Recorded after 8–9:* early fusion at chunk granularity beats chunked late fusion on long records and
+    recovers visual accuracy to ≥ 0.80.
 
 ## 3. Results
 
@@ -164,6 +173,46 @@ merge, the joint vector covers 58% (interviews), 43% (station), 71% (photos) and
 of the distance to the oracle. What remains is headroom for a router that could tell, per question, which
 signal to trust, which is what adaptive routing attempts, and a direction for future work.
 
+### 3.7 The boundary is record length (prediction 8: did not hold; 9: held)
+
+With a single unrelated part the joint vector still wins, overall (0.70 vs 0.39 for CombSUM) and on visual
+questions (0.47 vs 0.12): misalignment is not the boundary.
+
+Length is. Each photo's own description was buried among 0, 7 or 31 descriptions of NASA photos from
+outside the corpus, so answers stay unique while the relevant passage shrinks to 1/8 and 1/32 of the text.
+Late fusion was given ideal chunking (one vector per description, a record scored by its best chunk).
+
+| Hit@1 (visual / text) | 1 description | 8 descriptions | 32 descriptions |
+| --- | --- | --- | --- |
+| Joint vector, whole record | **0.93** (0.88 / 0.97) | 0.59 (0.60 / 0.57) | 0.54 (0.55 / 0.53) |
+| Chunked late fusion (CombSUM) | 0.75 | **0.82** (0.75 / 0.90) | **0.81** (0.72 / 0.90) |
+| Unchunked late fusion (CombSUM) | 0.76 | 0.55 | 0.40 |
+
+Chunked late fusion overtakes the joint vector significantly at 8 (22 vs 3 disputed, p < 0.001) and 32
+(26 vs 4, p < 0.001). Two effects compound. The relevant passage becomes a small share of what one vector
+summarizes, and the long text drowns out the other signal: the joint vector's accuracy on *visual*
+questions falls from 0.88 to 0.55 though the photo never changes. Unchunked late fusion degrades too,
+faster, so chunking, not merging, is what rescues late fusion here.
+
+### 3.8 Fusing per chunk restores it (prediction 10: held)
+
+Early fusion at chunk granularity embeds the photo together with each chunk; a record scores its best
+chunk.
+
+| Hit@1 (visual / text) | 8 descriptions | 32 descriptions |
+| --- | --- | --- |
+| Chunked late fusion | 0.82 | 0.81 |
+| **Chunk-level early fusion** | **0.93** (0.88 / 0.97) | **0.94** (0.90 / 0.97) |
+
+It matches the unpadded joint vector at both lengths, beats chunked late fusion (11 vs 3, p = 0.057 at 8;
+12 vs 2, p = 0.013 at 32) and restores visual accuracy to 0.88–0.90. The padding costs it nothing: the
+right record's best chunk is its own description with its photo, the same input as the unpadded record.
+Both chunked methods here used ideal boundaries. Through the library's own chunker, `Text(field,
+chunk=1600)` (paragraphs packed up to 1,600 characters, often two descriptions per chunk), the same
+records score 0.74 (0.78 / 0.70): significantly above one vector per record (24 vs 8, p = 0.007), level
+with chunked late fusion's ideal chunks (9 vs 15, p = 0.31), and below ideal chunk-level fusion (1 vs 17,
+p < 0.001). Chunk boundaries are the next lever.
+
 ## 4. Discussion
 
 **Why late fusion loses.** Every question about only one signal (most questions) produces lists that
@@ -172,15 +221,17 @@ them. Weights can't fix this, because the right weights depend on the question a
 arrives; routing fixes it per question and reaches parity, not better. A joint vector never produces the
 disagreement in the first place.
 
-**The boundary.** We set out to map where early fusion stops winning, and the obvious candidate (parts
-that don't describe the same thing) did not produce it. Early fusion degrades with misalignment; late
-fusion with RRF degrades more. Five merges, including learned weights, didn't produce it either (§3.6). Open
-questions: a single unrelated part rather than two; signals too large for one multimodal input (long
-documents), where early fusion must compress; and learned rerankers over the union of lists, which are
-closer to routing than to merging.
+**The boundary.** Misalignment is not it: early fusion degrades when a record's parts describe different
+things, but merged rankings degrade more, whether two parts are unrelated (§3.4) or one (§3.7). Smarter
+merges are not it either (§3.6). Length is (§3.7): once the relevant passage is a small share of a long
+part, one vector per record loses to chunked late fusion, and fusing per chunk wins it back (§3.8). What
+remains open: learned rerankers over the union of candidates, which are closer to routing than merging;
+very long *non-text* parts (hours of video, large image sets); and whether the per-chunk gain holds with
+chunk boundaries that cut through the relevant passage.
 
-**Practical rule.** If a record's signals describe the same thing, embed them together. Keep separate
-vectors only to *check* this on your own data: `Collection.evaluate()` in `cinematlas.core` runs exactly
+**Practical rule.** Fuse within a unit, chunk across units: embed a record's signals together, and when
+one of them is long, split it and embed each piece together with the others. Keep separate vectors only
+to *check* this on your own data: `Collection.evaluate()` in `cinematlas.core` runs exactly
 the comparison in §3.1 on your labelled questions and reports the paired test.
 
 ## 5. Limitations
@@ -195,6 +246,8 @@ the comparison in §3.1 on your labelled questions and reports the paired test.
   oracle. Learned-to-rank models over merged candidates were not tested.
 - The interview corpus tuned the late-fusion weights and routing thresholds; its numbers favour those
   systems, which is why the other two corpora exist.
+- The long records in §3.7–3.8 are constructed: real descriptions padded with other real descriptions.
+  Real long documents have internal structure and chunk boundaries that can split the relevant passage.
 - One embedding provider (Voyage AI). Early fusion needs a model that embeds interleaved text and images
   well; results will track that model's quality.
 
@@ -205,6 +258,8 @@ uv run python bench/ingest.py                    # interviews
 uv run python bench/ingest.py --no-captions      # caption ablation
 uv run python bench/ingest.py --station          # station corpus
 uv run python bench/photos.py --ingest           # photos, aligned and misaligned
+uv run python bench/boundary.py --ingest         # single-part and long-record tests
+uv run python bench/boundary.py --ingest-chunk-fusion 8 32 && uv run python bench/boundary.py --ingest-library
 uv run python bench/run.py                       # every table here → bench/RESULTS.md (incl. bench/fusion.py)
 ```
 

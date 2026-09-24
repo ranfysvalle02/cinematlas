@@ -202,6 +202,8 @@ def main() -> None:
         "",
         *smarter_merges(),
         "",
+        *boundary_section(),
+        "",
         "Reproduce: `uv run python bench/ingest.py`, then `--no-captions` and `--station`, then "
         "`uv run python bench/run.py` · "
         f"generated {time.strftime('%Y-%m-%d')}",
@@ -370,6 +372,81 @@ def beyond_video() -> list[str]:
            "still open; a smarter merge than RRF is the next thing to test."),
         "",
         "Reproduce: `uv run python bench/photos.py --ingest`, then `uv run python bench/run.py`.",
+    ]
+
+
+def _visual(methods: dict, name: str) -> float:
+    return methods[name]["by_kind"]["visual"]["hit1"]
+
+
+def boundary_section() -> list[str]:
+    """Where early fusion stops winning: one unrelated part, and long records."""
+    import boundary
+
+    res = boundary.evaluate()
+
+    def cell(m: dict, joint: bool) -> str:
+        base = f"{m['hit1']:.2f} ({m['by_kind']['visual']['hit1']:.2f} / {m['by_kind']['text']['hit1']:.2f})"
+        return f"**{base}**" if joint else f"{base}, {m['joint_only']} vs {m['method_only']}, p {fmt_p(m['p'])}"
+
+    def rows(block: list[dict]) -> list[str]:
+        methods = list(dict.fromkeys(m for row in block for m in row["methods"]))
+        out = ["| Method | " + " | ".join(r["name"] for r in block) + " |", "| --- |" + " --- |" * len(block)]
+        for m in methods:
+            out.append(f"| {m} | " + " | ".join(cell(r["methods"][m], m == "joint vector") if m in r["methods"]
+                                                  else "—" for r in block) + " |")
+        return out
+
+    b1, b2 = res["b1"], res["b2"]
+    mis = b1[1]["methods"]
+    long_rows = [r for r in b2 if not r["name"].endswith(" 1 description")]
+    late_wins = [r["name"] for r in long_rows if r["methods"]["chunked late (sum)"]["method_only"]
+                 > r["methods"]["chunked late (sum)"]["joint_only"] and r["methods"]["chunked late (sum)"]["p"] < 0.05]
+    fusion_rows = [r for r in long_rows if "chunk-level joint" in r["methods"]]
+    fusion_verdict = ""
+    if fusion_rows:
+        parts = []
+        for r in fusion_rows:
+            c, late = r["methods"]["chunk-level joint"], r["methods"]["chunked late (sum)"]
+            a_only, b_only, p = mcnemar(r["correct"]["chunk-level joint"], r["correct"]["chunked late (sum)"])
+            parts.append(f"{r['name']}: {c['hit1']:.2f} vs chunked late {late['hit1']:.2f} ({a_only} vs {b_only}, "
+                         f"p {fmt_p(p)}), visual {c['by_kind']['visual']['hit1']:.2f}")
+        fusion_verdict = (" Chunk-level fusion (the photo embedded together with each chunk, a record scoring its "
+                          "best chunk), predicted after seeing B2 to beat chunked late fusion and recover visual "
+                          "accuracy to 0.80 or more: " + "; ".join(parts) + ".")
+    return [
+        "## Where early fusion loses",
+        "",
+        "Two controlled tests on the photo corpus and its 80 questions ([boundary.py](boundary.py)). Cells: Hit@1 "
+        "(visual / text questions), and against the joint vector: questions only it got right vs only the method "
+        "got right, exact McNemar p.",
+        "",
+        "**B1: a single unrelated part.** Each record is `Text(description) + Image(photo)`, one part each, with "
+        "the photo's own description (aligned) or another photo's (misaligned). This removes the two-texts-vs-one-"
+        "photo imbalance of the earlier misaligned test.",
+        "",
+        *rows(b1),
+        "",
+        "**B2: long records.** Each record is `Text(body) + Image(photo)`, the body being the photo's own "
+        "description buried among 0, 7 or 31 descriptions of NASA photos from outside the corpus "
+        "([distractors](distractors.json)), so every answer stays unique. Chunked late fusion gets the ideal "
+        "chunking: one vector per description, a record scored by its best chunk, merged with the photo's vector. "
+        "Unchunked late fusion merges one whole-body vector with the photo's.",
+        "",
+        *rows(b2),
+        "",
+        "**Predictions vs outcome** (recorded before these runs). The joint vector still wins with one unrelated "
+        "part but loses to CombSUM on visual questions: "
+        + ("held." if _visual(mis, "merged (sum)") > _visual(mis, "joint vector")
+           else f"did not hold; it wins overall and on visual questions "
+                f"({mis['joint vector']['by_kind']['visual']['hit1']:.2f} vs "
+                f"{mis['merged (sum)']['by_kind']['visual']['hit1']:.2f}).")
+        + " On long records, chunked late fusion beats the joint vector significantly: "
+        + (f"held, on {', '.join(late_wins)}. " if late_wins else "did not hold. ")
+        + "This is the boundary: one vector per record stops working when a part is long enough that the relevant "
+        "passage is a small share of it, and the long text also drowns out the photo (the joint vector's visual "
+        "accuracy falls with length though the photo never changes)."
+        + fusion_verdict,
     ]
 
 

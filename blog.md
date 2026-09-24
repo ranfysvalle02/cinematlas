@@ -1,6 +1,6 @@
 # Fuse in the embedding, not in the ranking
 
-*What building video search taught us about where fusion belongs.*
+*What building video search taught us about where fusion belongs, and where it breaks.*
 
 ---
 
@@ -36,9 +36,10 @@ It scored **0.65**.
 | keyframes | 0.53 | **0.90** | 0.72 |
 | every index, merged with tuned rank fusion + reranker | 0.80 | 0.50 | 0.65 |
 
-Read the last row carefully. We took the best speech retriever and the best visual retriever, merged
-them with everything else we had, and got something **worse than either one on its own**, on average. It lost the visual questions
-the keyframes were winning (0.90 → 0.50), and it didn't even keep the speech questions (0.90 → 0.80).
+Read the last row carefully. We took the best speech retriever and the best visual retriever, merged them
+with everything else we had, and got something **worse than either one on its own**, on average. It lost
+the visual questions the keyframes were winning (0.90 → 0.50) and didn't even keep the speech questions
+(0.90 → 0.80).
 
 ## Why merging ranked lists fails
 
@@ -122,34 +123,15 @@ real chance to break, and it held.
 
 ## Testing it on video we never saw
 
-Everything so far came from one benchmark: 60 questions we wrote ourselves, on six interviews about one
-aircraft, with the router's thresholds tuned on those same questions. That's enough to say which gaps are
-real on this set. It isn't enough to say the finding holds anywhere else.
+All of that came from 60 questions we wrote ourselves, with the router tuned on them. So we built a second
+benchmark designed to break it: six NASA videos from a different domain (a silent station walkthrough,
+astronaut Q&A, science demos), 386 scenes, no captions, 80 questions written by an AI agent that saw only
+the videos, and nothing tuned on it. We also wrote down, beforehand, the decision it would settle: if the
+joint vector alone isn't significantly worse than the router, it becomes the default.
 
-So we built a second benchmark designed to break it:
-
-- **A different domain:** six NASA videos about life on the space station, including a silent 15-minute
-  walkthrough, an astronaut answering questions about space toilets, science demos and a food lab. 386
-  scenes, six times the first corpus.
-- **No burned-in captions.**
-- **Questions we didn't write.** An AI agent saw only the keyframes and transcripts, never the code or
-  any results, and wrote 40 speech and 40 visual questions.
-- **Nothing tuned on it.** Weights and thresholds stayed exactly as the first corpus set them.
-
-Before running it, we wrote down the decision it would settle: *if ranking by the joint vector alone is
-not significantly worse than the router on either corpus, and it's faster, it becomes the default.*
-
-| Mean Hit@1 | First corpus | Held-out corpus |
-| --- | --- | --- |
-| merged rankings, tuned + reranked | 0.65 | 0.21 |
-| **one joint vector** | **0.83** | **0.62** |
-| joint vector vs merged: disputed questions | 14 vs 3, p = 0.013 | **40 vs 7, p < 0.001** |
-
-The finding didn't just survive; the gap got wider. On unfamiliar video, merged rankings fell apart
-(0.21), and the joint vector won 40 of the 47 questions where the two disagreed.
-
-And the rule settled the default. Ranking by the joint vector tied the router again (14 vs 11, p = 0.69)
-at under half the latency.
+The gap got wider. Merged rankings fell to **0.21**; the joint vector held at **0.62**, winning 40 of the
+47 questions where they disagreed. It tied the router again at under half the latency, so it became the
+default.
 
 ## Beyond video
 
@@ -182,20 +164,37 @@ answer highest, chosen *knowing the answer*. No real system can do that. The joi
 the way from the best merge to the oracle without knowing anything about the question. The rest is what a
 perfect router could still add.
 
+## Where it finally breaks
+
+If misaligned parts and smarter merges couldn't beat one vector, what can? A vector has a fixed size.
+Put enough text into it and the part that matters becomes a rounding error.
+
+So we buried each photo's description among 7, then 31, descriptions of other NASA photos, and predicted
+that chunked late fusion (one vector per description, a record scored by its best chunk) would finally
+win. It did. With the answer 1/32 of the text, one vector per record fell from 0.93 to 0.54; chunked late
+fusion held at 0.81. Worse, the long text drowned out the photo: the joint vector's accuracy on questions
+about the *picture* fell from 0.88 to 0.55, though the picture never changed.
+
+That's the boundary. And it suggests its own fix: don't choose between fusing and chunking. Chunk the
+long part, and embed the photo *together with each chunk*. At 32 descriptions, that scored **0.94**, as
+good as with no padding at all, and the picture questions came back to 0.90. The rule that survives:
+
+**Fuse within a unit, chunk across units.**
+
+In the library it's one argument, `Text("body", chunk=…)`, with one caveat we measured: those 0.94 used
+ideal chunk boundaries, one description per chunk. The library's own chunker at 1,600 characters often
+packs two descriptions together and scores 0.74: still well above one vector per record (24 vs 8
+disputed), level with late fusion's ideal chunks, and short of the ideal. Where you cut matters.
+
 ## What each part is for
 
-- **The joint vector finds the record.** That's where the signals are fused, and it's the default
-  ranking in both the video search and `cinematlas.core`.
-- **The reranker finds the second.** A scene can run 30 seconds; the promise is *the second*. The
-  reranker scores only the sentences inside the scenes the vector found. (We'd once reported that the
-  router finds the second more often, 0.85 vs 0.71. Those figures came from different questions. On the
-  questions where both found the right scene, they picked the right second equally often: 16 vs 17 of 22,
-  and 6 vs 6 of 9.)
-- **The router is opt-in.** It ties overall but not everywhere: the joint vector is better on questions
-  about what was *shown* (9 vs 0 on the held-out set, p = 0.004), and the router leans ahead on what was
-  *said*, though not significantly. If your users mostly ask about speech, `routing="adaptive"` is one
-  argument away. We could have tuned the default until that gap closed, but a held-out set only means
-  something if nobody tunes on it.
+- **The joint vector finds the record.** It's the default ranking in the video search and in
+  `cinematlas.core`, per chunk when a part is long.
+- **The reranker finds the second.** It scores only the sentences inside what the vector found. (We once
+  reported the router finds the second more often, 0.85 vs 0.71; those figures came from different
+  questions. Matched, they're equal.)
+- **The router is opt-in.** It leans ahead on questions about what was *said*, behind on what was *shown*
+  (9 vs 0 on the held-out set). If your users mostly ask about speech, it's one argument away.
 
 ## The lesson that transfers
 
@@ -210,17 +209,19 @@ and their text), you face the same fork:
 Late fusion is easier to build and easier to explain on a whiteboard. It's also where accuracy goes to
 die, and where teams end up bolting on routers, classifiers and per-query weights to win it back.
 
-**If your signals describe the same thing, fuse them in the embedding, not in the ranking.**
+**If your signals describe the same thing, fuse them in the embedding, not in the ranking. If one of
+them is long, chunk it, and fuse each chunk.**
 
 ## What we don't know yet
 
 Three corpora, all NASA, 220 questions. The paired test tells us which gaps are real; it doesn't make
 three corpora representative of lectures, meetings, e-commerce or documents. The router's lean toward
 speech questions is consistent but not yet significant. Adaptive routing isn't perfectly repeatable:
-between two runs it changed its answer on one held-out question. And we still haven't found where late
-fusion wins, if anywhere.
+between two runs it changed its answer on one held-out question. The long records we tested were built by padding real
+descriptions, not real long documents, and our chunk boundaries were ideal; a real chunker will sometimes
+cut the answer in half.
 
-The write-up, with seven predictions made in advance and how each came out, is
+The write-up, with ten predictions made in advance and how each came out, is
 [paper.md](https://github.com/ranfysvalle02/cinematlas/blob/main/paper.md); every table is in
 [bench/RESULTS.md](https://github.com/ranfysvalle02/cinematlas/blob/main/bench/RESULTS.md). If it breaks
 on your data, `evaluate()` will tell you, and we want to know.

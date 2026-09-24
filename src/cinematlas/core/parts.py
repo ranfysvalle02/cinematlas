@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import copy
 import io
+import re
 import urllib.parse
 import urllib.request
 from collections.abc import Callable, Iterable, Mapping
@@ -67,14 +68,26 @@ class Part:
 
 
 class Text(Part):
-    """A text field. Lists of strings are joined; long text is truncated to ``max_chars``."""
+    """A text field. Lists of strings are joined; long text is truncated to ``max_chars``.
+
+    ``chunk=800`` splits long text into pieces of at most that many characters (paragraphs first) and
+    stores one joint vector per piece, each embedded *together with the record's other parts*. Search
+    keeps each record's best piece. One vector per record stops working once a part is long (bench/:
+    0.93 → 0.54 Hit@1 with the answer 1/32 of the text). Fusing per chunk recovers it: 0.94 with ideal
+    boundaries, 0.74 with 1,600-character packed chunks, so prefer chunks close to one idea each.
+    """
 
     kind = "text"
 
-    def __init__(self, field: Getter, *, max_chars: int = 8000, label: str | None = None):
+    def __init__(self, field: Getter, *, max_chars: int = 8000, label: str | None = None, chunk: int | None = None):
         super().__init__(field)
         self.max_chars = max_chars
         self.label = label  # e.g. label="Title" embeds "Title: ..." to give the model context
+        if chunk is not None and (not isinstance(field, str) or "." in field):
+            raise ValueError("chunk= needs a top-level field name, e.g. Text('body', chunk=1500)")
+        if chunk is not None and chunk < 100:
+            raise ValueError(f"chunk must be at least 100 characters, got {chunk}")
+        self.chunk = chunk
 
     def inputs(self, record: Mapping[str, Any]) -> list[EmbedInput]:
         value = get_field(record, self.field)
@@ -151,11 +164,43 @@ class Joint:
     def inputs(self, record: Mapping[str, Any]) -> list[EmbedInput]:
         return [item for part in self.parts for item in part.inputs(record)]
 
+    @property
+    def chunked(self) -> Text | None:
+        """The part that splits long text into chunks, if any (at most one)."""
+        found = [p for p in self.parts if isinstance(p, Text) and p.chunk]
+        if len(found) > 1:
+            raise ValueError("Only one part can use chunk=")
+        return found[0] if found else None
+
     def describe(self) -> str:
         return " + ".join(repr(p) for p in self.parts)
 
     def __repr__(self) -> str:
         return f"Joint({self.describe()})"
+
+
+_PARAGRAPH = re.compile(r"\n\s*\n")
+_SENTENCE_END = re.compile(r"(?<=[.!?])\s+")
+
+
+def split_chunks(text: str, size: int) -> list[str]:
+    """Pack paragraphs (then sentences, then hard cuts) into pieces of at most ``size`` characters."""
+    pieces: list[str] = []
+    for para in (p.strip() for p in _PARAGRAPH.split(text or "")):
+        units = [para] if len(para) <= size else [s for s in _SENTENCE_END.split(para) if s]
+        for unit in units:
+            while len(unit) > size:
+                pieces.append(unit[:size])
+                unit = unit[size:]
+            if unit:
+                pieces.append(unit)
+    chunks: list[str] = []
+    for piece in pieces:
+        if chunks and len(chunks[-1]) + 2 + len(piece) <= size:
+            chunks[-1] += "\n\n" + piece
+        else:
+            chunks.append(piece)
+    return chunks
 
 
 def as_joint(spec: Part | Joint) -> Joint:
