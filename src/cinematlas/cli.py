@@ -56,6 +56,12 @@ def _build_parser() -> argparse.ArgumentParser:
                     help="auto: table in a terminal, JSON lines when piped; context: citable text for an LLM")
     se.add_argument("-k", "--top-k", type=int, default=5)
     se.add_argument("--video-id")
+
+    demo = sub.add_parser("demo", help='Local web app: add a video, ask a question, jump to the second '
+                                       '(pip install "cinematlas[demo]")')
+    demo.add_argument("--host", default="127.0.0.1")
+    demo.add_argument("--port", type=int, default=8765)
+    demo.add_argument("--no-browser", action="store_true", help="don't open a browser tab")
     return p
 
 
@@ -89,6 +95,13 @@ def main(argv: Sequence[str] | None = None) -> int:
                 report = engine.doctor(check_voyage=not args.no_voyage)
                 print(json.dumps(report.to_dict(), indent=2) if args.json else report)
                 return 0 if report.ok else 1
+
+            if args.command == "demo":
+                from .demo import serve
+
+                engine.ensure_indexes()  # idempotent; a fresh collection needs its indexes before search
+                serve(engine, host=args.host, port=args.port, open_browser=not args.no_browser)
+                return 0
 
             if args.command == "setup":
                 mode = engine.ensure_indexes(update=args.update)

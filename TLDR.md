@@ -51,6 +51,7 @@ pip install "cinematlas[whisper]"
 export MONGODB_URI="mongodb+srv://…"  VOYAGE_API_KEY="pa-…"
 cinematlas ingest "https://www.youtube.com/watch?v=5NhYvbMdbBU"
 cinematlas search "how loud is a sonic boom?"     # → 0:56 "about as loud as a balloon popping"
+cinematlas demo                                   # the same in a browser, with a player that jumps there
 ```
 
 Any records, not just video:

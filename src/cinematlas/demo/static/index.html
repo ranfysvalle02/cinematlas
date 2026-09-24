@@ -1,0 +1,229 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Cinematlas: ask a question, get the second</title>
+<style>
+  :root { --bg: #0e1116; --panel: #161b22; --line: #2a313c; --text: #e6edf3; --muted: #8b949e;
+          --accent: #3fb950; --accent2: #58a6ff; --warn: #f0883e; }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text);
+         font: 15px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
+  header { display: flex; align-items: baseline; gap: 14px; padding: 16px 24px; border-bottom: 1px solid var(--line); }
+  header h1 { font-size: 20px; margin: 0; }
+  header .tag { color: var(--muted); }
+  header .coll { margin-left: auto; color: var(--muted); font-family: ui-monospace, monospace; font-size: 13px; }
+  main { display: grid; grid-template-columns: 340px 1fr; gap: 20px; padding: 20px 24px; }
+  .panel { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 16px; }
+  h2 { font-size: 13px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); margin: 0 0 10px; }
+  input[type=text] { width: 100%; padding: 10px 12px; border-radius: 8px; border: 1px solid var(--line);
+                     background: var(--bg); color: var(--text); font-size: 15px; }
+  button { padding: 9px 14px; border-radius: 8px; border: 0; background: var(--accent); color: #04130a;
+           font-weight: 600; cursor: pointer; }
+  button.secondary { background: transparent; color: var(--text); border: 1px solid var(--line); font-weight: 500; }
+  button:disabled { opacity: .5; cursor: default; }
+  .row { display: flex; gap: 8px; margin-top: 8px; }
+  .drop { margin-top: 10px; border: 1px dashed var(--line); border-radius: 8px; padding: 14px; text-align: center;
+          color: var(--muted); cursor: pointer; }
+  .drop.over { border-color: var(--accent2); color: var(--text); }
+  .job { margin-top: 12px; font-size: 13px; }
+  .job .stage { color: var(--muted); }
+  .job .stage.done::before { content: "✓ "; color: var(--accent); }
+  .job.failed { color: var(--warn); }
+  .videos { list-style: none; padding: 0; margin: 0; max-height: 52vh; overflow: auto; }
+  .videos li { padding: 8px 10px; border-radius: 8px; cursor: pointer; display: flex; justify-content: space-between; gap: 8px; }
+  .videos li:hover, .videos li.on { background: #1f2630; }
+  .videos .name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .videos .meta { color: var(--muted); font-size: 12px; flex: none; }
+  .search { display: flex; gap: 8px; }
+  .search input { font-size: 17px; padding: 12px 14px; }
+  .modes { display: flex; gap: 14px; margin-top: 8px; color: var(--muted); font-size: 13px; }
+  .scope { color: var(--accent2); font-size: 13px; margin-top: 6px; min-height: 18px; }
+  .stage-area { display: grid; grid-template-columns: minmax(0, 1.3fr) minmax(0, 1fr); gap: 18px; margin-top: 16px; }
+  .player { aspect-ratio: 16/9; background: #000; border-radius: 10px; overflow: hidden; display: grid; place-items: center;
+            color: var(--muted); }
+  .player iframe, .player video { width: 100%; height: 100%; border: 0; }
+  .now { margin-top: 10px; font-size: 14px; color: var(--muted); min-height: 42px; }
+  .now b { color: var(--text); }
+  .results { list-style: none; padding: 0; margin: 0; display: flex; flex-direction: column; gap: 8px; }
+  .results li { padding: 12px; border: 1px solid var(--line); border-radius: 10px; cursor: pointer; }
+  .results li:hover, .results li.on { border-color: var(--accent2); }
+  .results .at { font-family: ui-monospace, monospace; color: var(--accent); font-weight: 600; }
+  .results .src { color: var(--muted); font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .results .text { margin-top: 4px; }
+  .results .why { margin-top: 4px; color: var(--muted); font-size: 12px; }
+  .hint { color: var(--muted); font-size: 13px; }
+  .weak { color: var(--warn); font-size: 13px; margin-bottom: 4px; }
+  .examples { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+  .examples button { font-size: 12px; padding: 5px 9px; }
+  @media (max-width: 1000px) { main, .stage-area { grid-template-columns: 1fr; } }
+</style>
+</head>
+<body>
+<header>
+  <h1>Cinematlas</h1>
+  <span class="tag">Ask a question. Get the second in the video that answers it.</span>
+  <span class="coll" id="coll"></span>
+</header>
+
+<main>
+  <aside>
+    <section class="panel">
+      <h2>Add a video</h2>
+      <input type="text" id="url" placeholder="YouTube or video URL">
+      <div class="row"><button id="addUrl">Add</button></div>
+      <div class="drop" id="drop">or drop a video file here / click to choose</div>
+      <input type="file" id="file" accept="video/*" hidden>
+      <div id="jobs"></div>
+    </section>
+
+    <section class="panel" style="margin-top:16px">
+      <h2>Library <span class="hint" id="count"></span></h2>
+      <ul class="videos" id="videos"><li class="hint">Loading…</li></ul>
+    </section>
+  </aside>
+
+  <section>
+    <div class="panel">
+      <div class="search">
+        <input type="text" id="q" placeholder="Ask anything: what was said, or what was shown">
+        <button id="go">Search</button>
+      </div>
+      <div class="modes">
+        <label><input type="radio" name="mode" value="scene" checked> Default (joint vector)</label>
+        <label><input type="radio" name="mode" value="adaptive"> Adaptive routing</label>
+      </div>
+      <div class="scope" id="scope"></div>
+      <div class="examples" id="examples"></div>
+    </div>
+
+    <div class="stage-area">
+      <div>
+        <div class="player" id="player">Search, then pick a moment</div>
+        <div class="now" id="now"></div>
+      </div>
+      <ul class="results" id="results"></ul>
+    </div>
+  </section>
+</main>
+
+<script>
+const $ = (id) => document.getElementById(id);
+let scopeVideo = null;
+
+const fmt = (s) => { s = Math.max(0, Math.floor(s || 0)); return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`; };
+const esc = (t) => String(t ?? "").replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+const short = (label) => {
+  try {
+    const u = new URL(label), host = u.hostname.replace(/^(www|m)\./, "");
+    const yt = host === "youtu.be" ? u.pathname.slice(1) : host.endsWith("youtube.com") ? u.searchParams.get("v") : null;
+    if (yt) return `YouTube · ${yt}`;
+    const file = decodeURIComponent(u.pathname.split("/").filter(Boolean).pop() || "");
+    return file ? `${host} / ${file.slice(0, 32)}` : host;
+  } catch { return label; }
+};
+
+async function api(path, opts) {
+  const r = await fetch(path, opts);
+  const body = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(body.detail || r.statusText);
+  return body;
+}
+
+async function loadInfo() {
+  const info = await api("/api/info");
+  $("coll").textContent = info.collection;
+}
+
+async function loadVideos() {
+  const vids = await api("/api/videos");
+  $("count").textContent = vids.length ? `(${vids.length})` : "";
+  $("videos").innerHTML = vids.length ? "" : '<li class="hint">No videos yet: add one above.</li>';
+  for (const v of vids) {
+    const li = document.createElement("li");
+    li.innerHTML = `<span class="name" title="${esc(v.label)}">${esc(short(v.label))}</span>
+                    <span class="meta">${v.scenes} scenes${v.duration ? " · " + fmt(v.duration) : ""}</span>`;
+    li.onclick = () => {
+      scopeVideo = scopeVideo === v.video_id ? null : v.video_id;
+      document.querySelectorAll(".videos li").forEach((x) => x.classList.remove("on"));
+      if (scopeVideo) li.classList.add("on");
+      $("scope").textContent = scopeVideo ? `Searching only: ${short(v.label)} (click again for all)` : "";
+    };
+    $("videos").appendChild(li);
+  }
+  $("examples").innerHTML = "";
+  if (vids.length) for (const ex of ["what are they talking about?", "someone smiling", "a close-up of hands", "the most important point"]) {
+    const b = document.createElement("button"); b.className = "secondary"; b.textContent = ex;
+    b.onclick = () => { $("q").value = ex; search(); }; $("examples").appendChild(b);
+  }
+}
+
+function watchJob(jobId, label) {
+  const box = document.createElement("div"); box.className = "job"; $("jobs").prepend(box);
+  const names = { fetched: "fetched", scenes: "found scenes", transcribed: "transcribed speech", embedded: "embedded", stored: "stored" };
+  const tick = async () => {
+    const j = await api(`/api/jobs/${jobId}`);
+    const stages = j.stages.map((s) => `<div class="stage done">${names[s.stage] || s.stage}${s.count ? ` (${s.count})` : ""}</div>`).join("");
+    if (j.state === "running") { box.innerHTML = `<b>${esc(short(label))}</b>${stages}<div class="stage">working…</div>`; setTimeout(tick, 1500); }
+    else if (j.state === "done") { box.innerHTML = `<b>${esc(short(label))}</b>${stages}<div>Ready: ${j.result.scenes} scenes in ${Math.round(j.result.seconds)}s</div>`; loadVideos(); }
+    else { box.className = "job failed"; box.innerHTML = `<b>${esc(short(label))}</b><div>Failed: ${esc(j.error)}</div>`; }
+  };
+  tick();
+}
+
+$("addUrl").onclick = async () => {
+  const url = $("url").value.trim(); if (!url) return;
+  try { const { job } = await api("/api/videos", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ url }) });
+        $("url").value = ""; watchJob(job, url); } catch (e) { alert(e.message); }
+};
+async function upload(file) {
+  const form = new FormData(); form.append("file", file);
+  try { const { job } = await api("/api/videos", { method: "POST", body: form }); watchJob(job, file.name); } catch (e) { alert(e.message); }
+}
+$("drop").onclick = () => $("file").click();
+$("file").onchange = (e) => e.target.files[0] && upload(e.target.files[0]);
+$("drop").ondragover = (e) => { e.preventDefault(); $("drop").classList.add("over"); };
+$("drop").ondragleave = () => $("drop").classList.remove("over");
+$("drop").ondrop = (e) => { e.preventDefault(); $("drop").classList.remove("over"); e.dataTransfer.files[0] && upload(e.dataTransfer.files[0]); };
+
+function play(hit) {
+  const p = hit.play, start = Math.floor(p.start || 0);
+  if (p.kind === "youtube") $("player").innerHTML = `<iframe src="${p.src}?start=${start}&autoplay=1" allow="autoplay; encrypted-media" allowfullscreen></iframe>`;
+  else if (p.kind === "file") {
+    $("player").innerHTML = `<video controls autoplay src="${esc(p.src)}"></video>`;
+    const v = $("player").querySelector("video"); v.addEventListener("loadedmetadata", () => { v.currentTime = p.start || 0; }, { once: true });
+  } else $("player").textContent = "This video has no playable source (an upload from another machine).";
+  $("now").innerHTML = hit.text ? `<b>${hit.at}</b> · “${esc(hit.text)}”` : `<b>scene ${fmt(hit.scene_start)}–${fmt(hit.scene_end)}</b>`;
+}
+
+async function search() {
+  const q = $("q").value.trim(); if (!q) return;
+  const mode = document.querySelector("input[name=mode]:checked").value;
+  $("go").disabled = true; $("results").innerHTML = '<li class="hint">Searching…</li>';
+  try {
+    const params = new URLSearchParams({ q, mode, k: 6, ...(scopeVideo ? { video_id: scopeVideo } : {}) });
+    const res = await api(`/api/search?${params}`);
+    $("results").innerHTML = res.hits.length ? "" : '<li class="hint">No matches.</li>';
+    // The reranker's relevance says whether anything actually answers the question (rerank-2.5 scale).
+    const top = res.hits[0]?.relevance;
+    if (top != null && top < 0.35) $("results").innerHTML = '<li class="weak">No strong match: these are the closest moments.</li>';
+    res.hits.forEach((h, i) => {
+      const li = document.createElement("li");
+      li.innerHTML = `<div><span class="at">${h.at}</span> <span class="src">${esc(short(h.label))}</span></div>
+                      ${h.text ? `<div class="text">“${esc(h.text)}”</div>` : `<div class="text hint">scene ${fmt(h.scene_start)}–${fmt(h.scene_end)}</div>`}
+                      <div class="why">${esc(h.why)}</div>`;
+      li.onclick = () => { document.querySelectorAll(".results li").forEach((x) => x.classList.remove("on")); li.classList.add("on"); play(h); };
+      $("results").appendChild(li);
+      if (i === 0) li.click();
+    });
+  } catch (e) { $("results").innerHTML = `<li class="hint">Search failed: ${esc(e.message)}</li>`; }
+  finally { $("go").disabled = false; }
+}
+$("go").onclick = search;
+$("q").addEventListener("keydown", (e) => e.key === "Enter" && search());
+
+loadInfo(); loadVideos();
+</script>
+</body>
+</html>

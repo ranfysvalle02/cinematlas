@@ -16,6 +16,11 @@ cinematlas search "how loud is a sonic boom?"
     https://www.youtube.com/watch?v=5NhYvbMdbBU&t=51s
 ```
 
+**Or try it in the browser:** `pip install "cinematlas[demo,whisper]"` and `cinematlas demo`. Add a video
+by URL or upload, ask a question, and the player jumps to the second that answers it.
+
+![The Cinematlas demo: a question, ranked moments, and the player at 0:56](https://raw.githubusercontent.com/ranfysvalle02/cinematlas/main/docs/demo.png)
+
 ---
 
 ## The finding: fuse within a unit, chunk across units
@@ -262,6 +267,7 @@ cinematlas doctor                        # checks the deployment and prints the 
 cinematlas setup [--update]              # create indexes; --update upgrades them in place
 cinematlas ingest <url|path|->           # progress on stderr, JSON on stdout
 cinematlas search "<question>" [-k 5] [--by hybrid|adaptive|transcript|visual|text] [--format table|json|context]
+cinematlas demo [--port 8765]            # local web app: add videos, search, jump to the second
 ```
 
 Global options: `--uri`, `--db`, `--collection`, `--transcript-mode`, `-v`.
@@ -286,6 +292,7 @@ cinematlas/
   search.py        single sources, fusion, reranking, routing
   capabilities.py  native-stage fallbacks and routing calibration
   doctor.py        what's wrong and how to fix it
+  demo/            cinematlas demo: FastAPI server + a one-file web page
   core/            joint-vector search for any records: parts, chunkers, loaders, evaluate()
 ```
 
