@@ -1,0 +1,80 @@
+[project]
+name = "cinematlas"
+version = "0.4.2"
+description = "Search inside video down to the second: hybrid keyframe + speech search on MongoDB Atlas ($rankFusion, $rerank, autoEmbed) and Voyage AI."
+readme = "README.md"
+license = "MIT"
+license-files = ["LICENSE"]
+authors = [{ name = "Fabian Valle", email = "fabian.valle-simmons@mongodb.com" }]
+requires-python = ">=3.10"
+keywords = ["video", "search", "mongodb", "atlas", "vector-search", "hybrid-search", "rankfusion", "rerank", "voyageai", "embeddings", "multimodal", "whisper"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Database",
+    "Topic :: Multimedia :: Video",
+    "Typing :: Typed",
+]
+dependencies = [
+    "pymongo>=4.7",
+    "voyageai>=0.3",
+    "scenedetect>=0.6.4",
+    "opencv-python-headless>=4.8",
+    "pillow>=10.0",
+    "yt-dlp>=2024.1.1",
+]
+
+[project.scripts]
+cinematlas = "cinematlas.cli:main"
+
+[project.optional-dependencies]
+s3 = ["boto3>=1.28"]
+openai = ["openai>=1.0"]
+whisper = ["faster-whisper>=1.0"]                 # local STT, CPU-friendly, no PyTorch
+all = ["cinematlas[s3,openai,whisper]"]
+
+[project.urls]
+Homepage = "https://github.com/ranfysvalle02/cinematlas"
+Documentation = "https://github.com/ranfysvalle02/cinematlas#readme"
+Benchmark = "https://github.com/ranfysvalle02/cinematlas/blob/main/bench/RESULTS.md"
+Issues = "https://github.com/ranfysvalle02/cinematlas/issues"
+
+[dependency-groups]
+dev = [
+    "pytest>=8",
+    "pytest-cov>=5",
+    "python-dotenv>=1.0",
+    "boto3>=1.28",
+    "moto[s3]>=5",
+    "ruff>=0.6",
+    "faster-whisper>=1.0",
+]
+
+[build-system]
+requires = ["hatchling>=1.26"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.sdist]
+include = ["src/cinematlas", "tests", "README.md", "LICENSE"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests/unit", "tests/media", "tests/integration"]  # fast -> slow: fail fast, no CPU contention
+pythonpath = ["tests"]
+addopts = "-ra --strict-markers"
+markers = [
+    "integration: hits real MongoDB Atlas / Voyage AI (needs MDB_URI or MONGODB_URI + VOYAGE_API_KEY)",
+    "atlas_local: needs Docker (mongodb/mongodb-atlas-local) - client-side embedding path",
+    "media: real yt-dlp downloads (network) and real speech-to-text models",
+]
+
+[tool.ruff]
+line-length = 120
+target-version = "py310"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B", "UP"]
