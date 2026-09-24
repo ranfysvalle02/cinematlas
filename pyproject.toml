@@ -1,7 +1,7 @@
 [project]
 name = "cinematlas"
-version = "0.4.2"
-description = "Search inside video down to the second: hybrid keyframe + speech search on MongoDB Atlas ($rankFusion, $rerank, autoEmbed) and Voyage AI."
+version = "0.4.3"
+description = "Search inside video down to the second: one joint keyframe+speech vector per scene on MongoDB Atlas and Voyage AI, with sentence-level reranking."
 readme = "README.md"
 license = "MIT"
 license-files = ["LICENSE"]
@@ -78,3 +78,7 @@ target-version = "py310"
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "B", "UP"]
+
+[tool.uv]
+# onnxruntime 1.24+ ships no Python 3.10 wheels.
+constraint-dependencies = ["onnxruntime<1.24; python_version < '3.11'"]
