@@ -1,0 +1,202 @@
+[
+ {
+  "q": "Why does the food lab consider space food its own cuisine?",
+  "video": "food",
+  "answer": "I think we formed our own cuisine"
+ },
+ {
+  "q": "How many food and drink items are on the ISS standard menu?",
+  "video": "food",
+  "answer": "over 200 different food and beverage items"
+ },
+ {
+  "q": "What are the green pouches of space food similar to?",
+  "video": "food",
+  "answer": "like the canned foods you can find"
+ },
+ {
+  "q": "How does freeze drying make space food lighter?",
+  "video": "food",
+  "answer": "the weight becomes super light"
+ },
+ {
+  "q": "How long do freeze-dried meals need to hydrate before eating?",
+  "video": "food",
+  "answer": "hydrate for 10-15 minutes"
+ },
+ {
+  "q": "How does water help astronauts eat with a spoon in microgravity?",
+  "video": "food",
+  "answer": "Water acts like a glue"
+ },
+ {
+  "q": "What shelf life is needed for food on a Mars mission?",
+  "video": "food",
+  "answer": "targeting five to seven years shelf life"
+ },
+ {
+  "q": "How do astronauts get salt on their food without a shaker?",
+  "video": "food",
+  "answer": "send this as a liquid salt"
+ },
+ {
+  "q": "How big is the Neutral Buoyancy Lab pool?",
+  "video": "nbl",
+  "answer": "202 feet long, 102 feet wide"
+ },
+ {
+  "q": "How many gallons of water are in the NBL pool?",
+  "video": "nbl",
+  "answer": "6.2 million gallons"
+ },
+ {
+  "q": "What is the ISS mock-up in the pool used for?",
+  "video": "nbl",
+  "answer": "It's for spacewalk training"
+ },
+ {
+  "q": "Why do the mock-ups match the real station exactly?",
+  "video": "nbl",
+  "answer": "handrails in the same locations"
+ },
+ {
+  "q": "What kinds of divers are on the dive team?",
+  "video": "nbl",
+  "answer": "float camera divers"
+ },
+ {
+  "q": "What spacesuit was the astronaut putting on for the test?",
+  "video": "nbl",
+  "answer": "XEMU, which is the Exploration Suit"
+ },
+ {
+  "q": "Why can astronauts see better in the new suit?",
+  "video": "nbl",
+  "answer": "the helmet bubble is a lot different"
+ },
+ {
+  "q": "What do they use to recreate the lunar surface underwater?",
+  "video": "nbl",
+  "answer": "the perfect hydrophobic"
+ },
+ {
+  "q": "Where did Don Pettit grow up and get interested in science?",
+  "video": "pettit",
+  "answer": "back in Silverton, Oregon"
+ },
+ {
+  "q": "What does Pettit call science that comes up spontaneously on the station?",
+  "video": "pettit",
+  "answer": "what I call science of opportunity"
+ },
+ {
+  "q": "What scientific fields has Pettit worked in on the ISS?",
+  "video": "pettit",
+  "answer": "biology, plant growth"
+ },
+ {
+  "q": "Which of Pettit's experiments led to peer-reviewed papers about salt?",
+  "video": "pettit",
+  "answer": "growing sodium chloride crystals"
+ },
+ {
+  "q": "What happened when Pettit shook bags of powder in weightlessness?",
+  "video": "pettit",
+  "answer": "form centimeter-sized clumps"
+ },
+ {
+  "q": "Why did a planetary geologist care about the powder clumping video?",
+  "video": "pettit",
+  "answer": "implications to planet formation"
+ },
+ {
+  "q": "What did Pettit build out of Legos on the station?",
+  "video": "pettit",
+  "answer": "make a Vandegraaff generator"
+ },
+ {
+  "q": "Which journal published the paper using the Lego generator data?",
+  "video": "pettit",
+  "answer": "published a paper at Fizz Rev Letters"
+ },
+ {
+  "q": "How long was Jessica Meir on the space station?",
+  "video": "potty",
+  "answer": "205 days on board"
+ },
+ {
+  "q": "How quickly do you become weightless after launch?",
+  "video": "potty",
+  "answer": "after only about eight minutes"
+ },
+ {
+  "q": "What musical instrument did Jessica Meir bring to space?",
+  "video": "potty",
+  "answer": "I brought was my piccolo"
+ },
+ {
+  "q": "How does the space toilet keep waste from floating away?",
+  "video": "potty",
+  "answer": "we actually use a vacuum system"
+ },
+ {
+  "q": "Why is the new ISS toilet better for women?",
+  "video": "potty",
+  "answer": "there are some anatomical differences"
+ },
+ {
+  "q": "How do astronauts wash their hair on the station?",
+  "video": "potty",
+  "answer": "we take a drink bag"
+ },
+ {
+  "q": "What was different about Meir's menu in the food physiology experiment?",
+  "video": "potty",
+  "answer": "more fishes higher omega-3s"
+ },
+ {
+  "q": "How fast does the station travel around Earth?",
+  "video": "potty",
+  "answer": "17,500 miles per hour"
+ },
+ {
+  "q": "How long had it been since Kate Rubins was last in space?",
+  "video": "rubins",
+  "answer": "years since I've been there"
+ },
+ {
+  "q": "What does Kate Rubins compare the space station lab to?",
+  "video": "rubins",
+  "answer": "campus, a world-class university"
+ },
+ {
+  "q": "How many experiments run on a typical ISS mission?",
+  "video": "rubins",
+  "answer": "There's about 200 experiments"
+ },
+ {
+  "q": "Why is molecular biology harder to do in space?",
+  "video": "rubins",
+  "answer": "just inventing how to do lab work"
+ },
+ {
+  "q": "Why can't lab work on the station be fully automated?",
+  "video": "rubins",
+  "answer": "This is why we can't automate things"
+ },
+ {
+  "q": "What was the goal of swabbing the station for microbes?",
+  "video": "rubins",
+  "answer": "take a census of which microbes"
+ },
+ {
+  "q": "How many microbe samples was Rubins collecting?",
+  "video": "rubins",
+  "answer": "about 1,000 samples total"
+ },
+ {
+  "q": "What does Rubins hope to sequence in space next?",
+  "video": "rubins",
+  "answer": "multiplexing 96 well plates"
+ }
+]

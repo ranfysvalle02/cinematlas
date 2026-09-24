@@ -2,6 +2,7 @@
 
     uv run python bench/ingest.py                # both transcript backends, as shipped
     uv run python bench/ingest.py --no-captions  # caption ablation: keyframes with the caption band cropped
+    uv run python bench/ingest.py --station      # held-out corpus: ISS videos, different domain, no captions
 """
 
 import argparse
@@ -14,7 +15,17 @@ from typing import Any
 from dotenv import load_dotenv
 
 sys.path.insert(0, str(Path(__file__).parent))
-from corpus import CAPTION_BAND, COLLECTIONS, DB, EPISODES, NO_CAPTIONS, url  # noqa: E402
+from corpus import (  # noqa: E402
+    CAPTION_BAND,
+    COLLECTIONS,
+    DB,
+    EPISODES,
+    NO_CAPTIONS,
+    STATION,
+    STATION_COLLECTION,
+    STATION_DB,
+    url,
+)
 
 from cinematlas import Cinematlas  # noqa: E402
 
@@ -33,10 +44,11 @@ class CaptionFree(Cinematlas):
         return scenes
 
 
-def ingest(cls: type[Cinematlas], uri: str, mode: str, coll: str) -> None:
-    with cls(uri, db_name=DB, collection_name=coll, transcript_mode=mode) as eng:
+def ingest(cls: type[Cinematlas], uri: str, mode: str, coll: str, db: str = DB,
+           episodes: dict[str, str] = EPISODES) -> None:
+    with cls(uri, db_name=db, collection_name=coll, transcript_mode=mode) as eng:
         print(f"[{coll}] indexes ->", eng.ensure_indexes(timeout_s=900))
-        for vid, nasa_id in EPISODES.items():
+        for vid, nasa_id in episodes.items():
             t = time.time()
             n = eng.ingest_video(url(nasa_id), video_id=vid)
             print(f"[{coll}] {vid}: {n} scenes in {time.time() - t:.0f}s")
@@ -45,8 +57,12 @@ def ingest(cls: type[Cinematlas], uri: str, mode: str, coll: str) -> None:
 def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--no-captions", action="store_true", help="ingest only the caption-ablation collection")
+    ap.add_argument("--station", action="store_true", help="ingest only the held-out ISS corpus")
     args = ap.parse_args()
     uri = os.getenv("MONGODB_URI") or os.environ["MDB_URI"]
+    if args.station:
+        ingest(Cinematlas, uri, "autoembed", STATION_COLLECTION, STATION_DB, STATION)
+        return
     if args.no_captions:
         ingest(CaptionFree, uri, "autoembed", NO_CAPTIONS)
         return

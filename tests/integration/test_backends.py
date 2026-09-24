@@ -116,13 +116,19 @@ def _assert_real_clip_searchable(eng, vid):
     assert top("brewing craft beer")["scene_id"] == 3
     assert top("wind tunnel testing of a supersonic plane")["scene_id"] == 0
 
-    # Hybrid search: fused sources, reranked sentences, and a deep link to the exact moment.
-    hits = eventually(lambda: (r := eng.search("how many medals has the beer won?", top_k=3, video_id=vid))
-                      and "rerank" in r[0]["ranks"] and r)
+    # Default: the joint vector ranks scenes, reranked sentences pick the exact moment.
+    question = "how many medals has the beer won?"
+    hits = eventually(lambda: (r := eng.search(question, top_k=3, video_id=vid)) and "rerank" in r[0]["ranks"] and r)
     assert hits and hits[0]["scene_id"] == 3
     assert "medals" in hits[0]["moment"]["text"].lower()
     assert hits[0]["moment"]["start"] > hits[0]["timestamp_start"], "moment is inside the scene, not its start"
-    assert set(hits[0]["ranks"]) >= {"visual", "scene", "transcript", "rerank"}
+    assert set(hits[0]["ranks"]) == {"scene", "rerank"}
+
+    # Adaptive routing: every source fused in one $rankFusion query, same scene, same moment.
+    fused = eventually(lambda: (r := eng.search(question, top_k=3, video_id=vid, routing="adaptive"))
+                       and "rerank" in r[0]["ranks"] and r)
+    assert fused and fused[0]["scene_id"] == 3 and "medals" in fused[0]["moment"]["text"].lower()
+    assert set(fused[0]["ranks"]) >= {"visual", "scene", "transcript", "rerank"}
 
     visual = eventually(lambda: eng.search_visual_vector("a person being interviewed", top_k=4, video_id=vid))
     assert visual and {r["video_id"] for r in visual} == {vid}

@@ -26,25 +26,26 @@ lists. That fails, because the lists disagree on every question that's about onl
 merging averages the disagreement away. Cinematlas embeds each scene's keyframe **and** its transcript
 into **one** vector, so there's nothing to reconcile.
 
-| Same signals, fused… | Said | Shown | Mean Hit@1 |
-| --- | --- | --- | --- |
-| after retrieval (rank fusion, tuned weights, reranked) | 0.80 | 0.50 | 0.65 |
-| **inside one joint image+speech vector** | 0.73 | 0.93 | **0.83** |
+| Mean Hit@1 | First corpus | Held-out corpus |
+| --- | --- | --- |
+| merged rankings (rank fusion, tuned weights, reranked) | 0.65 | 0.21 |
+| **one joint image+speech vector** | **0.83** | **0.62** |
+| questions where exactly one wins (joint vs merged) | 14 vs 3, p = 0.013 | 40 vs 7, p < 0.001 |
 
-On the questions where the two disagree, the joint vector wins 14 and loses 3 (exact McNemar p = 0.013).
+**It holds on video we never tuned on.** The held-out corpus is a different domain (a silent station
+tour, astronaut Q&A, science demos; 386 scenes, no burned-in captions), with 80 questions written by an
+agent that saw only the videos, never the code or results.
 
-**It isn't reading the subtitles.** Every frame in the benchmark has burned-in captions, so we cropped
-them off and re-embedded. Keyframes alone dropped on speech questions (0.53 → 0.40), because the pixels
-had been reading the subtitles. The joint vector didn't drop (0.73 → 0.77): the speech is in the
-embedding, not painted on the frame.
+**It isn't reading subtitles.** On the first corpus, where every frame has burned-in captions, cropping
+them made keyframes alone worse on speech (0.53 → 0.40) but left the joint vector intact (0.73 → 0.77).
 
-**The router we built to fix rank fusion is now optional.** Routing each question to a specialist
-recovers late fusion to 0.82, statistically tied with the joint vector alone (p = 1.0). The joint vector
-finds the scene in one query (~80 ms). `search()` adds a sentence reranker on top to return the exact
-second.
+**So the default ranks with that one vector.** `search()` finds scenes with the joint vector and uses a
+sentence reranker only to pick the exact second. The router we built to rescue merged rankings ties it on
+both corpora (p = 1.0 and p = 0.69) at about twice the latency, so it's now opt-in. The two do differ: the
+default is better on questions about what was shown, routing leans ahead on what was said. If your users
+mostly ask about speech, pass `routing="adaptive"`.
 
-60 questions over 6 videos from one program, written by the authors. The paired test is how we tell
-signal from noise. [Full results, caption ablation and limits](https://github.com/ranfysvalle02/cinematlas/blob/main/bench/RESULTS.md) ·
+[Full results, both corpora, caption ablation and limits](https://github.com/ranfysvalle02/cinematlas/blob/main/bench/RESULTS.md) ·
 [the story: fuse in the embedding, not in the ranking](https://github.com/ranfysvalle02/cinematlas/blob/main/blog.md).
 
 ---
@@ -85,30 +86,18 @@ They need only `MONGODB_URI` and `VOYAGE_API_KEY` in `.env`. The first two searc
 NASA interviews; the last two index your own video.
 
 ```bash
-uv run python examples/search.py "how loud is a sonic boom?"             # said → the exact sentence
-uv run python examples/search.py "a little girl standing on hay bales"   # shown → the scene
+uv run python examples/search.py "a little girl standing on hay bales"
+uv run python examples/search.py --adaptive "what did he say about his first flight?"
 uv run python examples/ask.py "What first got these people interested in aviation?"
 uv run python examples/index_and_search.py lecture.mp4 "when is the exam?"
 ```
 
 | Example | What it does |
 | --- | --- |
-| [`search.py`](https://github.com/ranfysvalle02/cinematlas/blob/main/examples/search.py) | Reads each question as about what was said or shown, and returns the second or the scene, with why each hit ranked. `--fast` runs the joint vector alone |
+| [`search.py`](https://github.com/ranfysvalle02/cinematlas/blob/main/examples/search.py) | The scene and the second for any question, with why each hit ranked. `--adaptive` shows routing reading a question as said or shown |
 | [`ask.py`](https://github.com/ranfysvalle02/cinematlas/blob/main/examples/ask.py) | A cited answer from a local LLM ([Ollama](https://ollama.com), no API key), each citation a link to the exact second |
 | [`index_and_search.py`](https://github.com/ranfysvalle02/cinematlas/blob/main/examples/index_and_search.py) | Index any URL, YouTube link or file with live progress, then search it |
 | [`api.py`](https://github.com/ranfysvalle02/cinematlas/blob/main/examples/api.py) | A FastAPI service: `POST /videos` to upload, `GET /search` for deep links |
-
---- | --- | --- |
-| Basic | [`01_search.py`](https://github.com/ranfysvalle02/cinematlas/blob/main/examples/01_search.py) | A question in, the second that answers it out |
-| Basic | [`02_fast_scene_search.py`](https://github.com/ranfysvalle02/cinematlas/blob/main/examples/02_fast_scene_search.py) | The joint vector alone (~65 ms) against the full `search()` |
-| Advanced | [`03_why_it_ranked.py`](https://github.com/ranfysvalle02/cinematlas/blob/main/examples/03_why_it_ranked.py) | How a question is read as said or shown, and why each hit ranked |
-| Advanced | [`04_answer_with_ollama.py`](https://github.com/ranfysvalle02/cinematlas/blob/main/examples/04_answer_with_ollama.py) | A cited answer from a local LLM ([Ollama](https://ollama.com)), each citation a deep link |
-| Advanced | [`05_ingest_your_video.py`](https://github.com/ranfysvalle02/cinematlas/blob/main/examples/05_ingest_your_video.py) | Index any URL or file with live progress, then search it |
-| Advanced | [`06_fastapi_app.py`](https://github.com/ranfysvalle02/cinematlas/blob/main/examples/06_fastapi_app.py) | A video upload + search API in about 20 lines |
-
-```bash
-uv run python examples/01_search.py "how loud is a sonic boom?"
-```
 
 ---
 
@@ -123,14 +112,18 @@ uv run python examples/01_search.py "how loud is a sonic boom?"
                 → one MongoDB Atlas document per scene
 
  search(question)
-   ├─ $rankFusion over scene, keyframe, transcript and BM25 retrieval       one query
-   ├─ $rerank over candidate sentences                                      picks the second
-   └─ routing by reranker confidence                                        said vs shown
+   ├─ joint-vector search over scenes                                        one query, ranks scenes
+   └─ $rerank over those scenes' sentences                                   picks the second
+
+ search(question, routing="adaptive")
+   ├─ $rankFusion over scene, keyframe, transcript and BM25 retrieval        one query
+   └─ weights set per question by the reranker's confidence                  said vs shown
 ```
 
 | Need | Call |
 | --- | --- |
 | The scene and the exact second (default) | `search(q)` |
+| Mostly questions about speech | `search(q, routing="adaptive")` |
 | The scene, fastest | `search_scene_vector(q)` |
 | Speech only | `search(q, sources=("transcript", "text"))` |
 | Your own blend | `search(q, weights={"scene": 2, "transcript": 1, "rerank": 1})` |
@@ -170,7 +163,10 @@ uv sync
 uv run pytest -m "not integration and not media"    # unit, offline (~9 s)
 uv run pytest -m media                               # real ffmpeg / Whisper on a committed NASA fixture
 uv run pytest -m integration                         # live Atlas + Docker Atlas Local (reads .env)
-uv run python bench/ingest.py && uv run python bench/ingest.py --no-captions && uv run python bench/run.py
+uv run python bench/ingest.py                        # the benchmark corpora, once:
+uv run python bench/ingest.py --no-captions          #   caption ablation
+uv run python bench/ingest.py --station              #   held-out corpus
+uv run python bench/run.py                           # both corpora, caption ablation, paired tests
 ```
 
 MIT license. Test and benchmark media: NASA, public domain.

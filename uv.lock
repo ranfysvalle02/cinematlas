@@ -605,7 +605,7 @@ wheels = [
 
 [[package]]
 name = "cinematlas"
-version = "0.4.5"
+version = "0.5.0"
 source = { editable = "." }
 dependencies = [
     { name = "opencv-python-headless" },

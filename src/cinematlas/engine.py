@@ -77,7 +77,11 @@ SOURCES = ("visual", "scene", "transcript", "text")
 # Tuned on bench/ (30 labelled questions, 6 videos): the keyframe list is noisy for questions
 # about speech, so it acts as a tie-breaker; the sentence-level reranker carries the most signal.
 DEFAULT_WEIGHTS = {"visual": 0.25, "scene": 1.0, "transcript": 1.0, "text": 1.0, "rerank": 2.0}
-# Adaptive routing (default). Questions are usually about what was *said* or what was *shown*, and
+# Default search is scene-first: one joint keyframe+speech vector per scene ranks the scenes and the
+# reranker only picks each scene's moment. On both bench/ corpora it ties adaptive routing (it wins
+# questions about what's shown, leans behind on what's said) at about half the latency.
+#
+# Adaptive routing (routing="adaptive"). Questions are usually about what was *said* or what was *shown*, and
 # fusing a speech specialist with a visual one loses to whichever specialist fits (bench/). The
 # sentence reranker's top relevance says which it is: speech confidence
 # f = clamp((relevance - lo) / (hi - lo), 0, 1) scales the speech group by f, the visual group by 1 - f.
@@ -412,10 +416,11 @@ class Cinematlas:
             add(Check("Routing", "info", "off (no reranker): search() uses fixed fusion"))
         elif self.routing_thresholds is not None:
             lo, hi = self.routing_thresholds
-            add(Check("Routing", "ok", f"adaptive, custom calibration ({lo:.2f}–{hi:.2f})"))
+            add(Check("Routing", "ok", f"scene-first default; adaptive custom calibration ({lo:.2f}–{hi:.2f})"))
         elif self.rerank_model in ROUTING_CALIBRATION:
             lo, hi = ROUTING_CALIBRATION[self.rerank_model]
-            add(Check("Routing", "ok", f"adaptive, calibrated for {self.rerank_model} ({lo:.2f}–{hi:.2f})"))
+            add(Check("Routing", "ok",
+                      f"scene-first default; adaptive calibrated for {self.rerank_model} ({lo:.2f}–{hi:.2f})"))
         else:
             add(Check("Routing", "warn", f"no calibration for {self.rerank_model}; using fixed fusion",
                       "Calibrate on your data with bench/ and pass routing_thresholds=(lo, hi), "
@@ -1329,9 +1334,20 @@ class Cinematlas:
         rerank: bool = True,
         candidates: int | None = None,
         weights: dict[str, float] | None = None,
-        routing: str = "adaptive",
+        routing: str | None = None,
     ) -> SearchResults:
-        """Hybrid search over what was shown and what was said, down to the exact moment.
+        """Search what was shown and what was said, down to the exact moment.
+
+        ``routing`` picks the strategy:
+
+        * ``"scene"`` (default): the joint keyframe+speech vector ranks scenes in one query; the
+          reranker scores only those scenes' sentences to pick each one's moment.
+        * ``"adaptive"``: all sources fused, weighted per question by the reranker's confidence that
+          it's about speech. Leans ahead on questions about what was said, behind on what was shown.
+        * ``"fixed"``: all sources fused with ``weights``.
+
+        Passing ``weights`` or ``sources`` without ``routing`` keeps fusion: adaptive routing, or fixed
+        fusion when ``weights`` is given.
 
         Sources, fused with Reciprocal Rank Fusion (``weights``, default :data:`DEFAULT_WEIGHTS`):
 
@@ -1352,11 +1368,27 @@ class Cinematlas:
         unknown = set(sources) - set(SOURCES)
         if unknown:
             raise ValueError(f"Unknown sources: {sorted(unknown)}")
+        if routing is None:
+            if weights is None and tuple(sources) == SOURCES and self.scene_embeddings:
+                try:
+                    results = self.search(query_text, top_k, video_id, rerank=rerank, candidates=candidates,
+                                          routing="scene")
+                    if results:  # empty: scenes ingested before scene vectors existed; fuse instead
+                        return results
+                except SearchError as e:  # no scene index here (older deployment): fuse everything instead
+                    if ("scene-first", type(e).__name__) not in _WARNED:
+                        _WARNED.add(("scene-first", type(e).__name__))
+                        logger.warning(f"Scene-first search unavailable ({e}); using adaptive fusion. "
+                                       "Fix: engine.ensure_indexes() and re-ingest with scene_embeddings=True.")
+            routing = "adaptive"
+        if routing not in ("adaptive", "fixed", "scene"):
+            raise ValueError(f"routing must be 'adaptive', 'fixed' or 'scene', got {routing!r}")
         n = candidates or max(top_k * 4, 20)
-        if routing not in ("adaptive", "fixed"):
-            raise ValueError(f"routing must be 'adaptive' or 'fixed', got {routing!r}")
         user_weights = weights
         weights = {**DEFAULT_WEIGHTS, **(weights or {})}
+        if routing == "scene":
+            # The joint image+speech vector ranks scenes; the reranker only picks each scene's moment.
+            sources, n, weights = ("scene",), candidates or top_k, {"scene": 1.0, "rerank": 0.0}
 
         mm_vec = self._embed_multimodal_query(query_text) if {"visual", "scene"} & set(sources) else None
         pipelines: dict[str, list[dict[str, Any]]] = {}

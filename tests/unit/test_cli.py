@@ -150,6 +150,11 @@ def test_search_routes_by_modality(run):
     assert eng.calls[0] == ("search_visual_vector", "sonic boom", {"top_k": 2, "video_id": "v"})
 
 
+def test_search_by_adaptive_opts_into_routing(run):
+    _, _, _, eng = run("search", "sonic boom", "--by", "adaptive", "--format", "json")
+    assert eng.calls[0] == ("search", "sonic boom", {"top_k": 5, "video_id": None, "routing": "adaptive"})
+
+
 def test_console_script_is_installed():
     out = subprocess.run([sys.executable, "-m", "cinematlas.cli", "--help"], capture_output=True, text=True)
     assert out.returncode == 0 and all(cmd in out.stdout for cmd in ("doctor", "setup", "ingest", "search"))

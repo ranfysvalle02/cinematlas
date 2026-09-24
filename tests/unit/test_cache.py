@@ -79,9 +79,9 @@ def indexed(engine, fake_mongo):
 
 
 def test_repeated_searches_skip_voyage_and_return_identical_results(indexed, fake_voyage):
-    first = indexed.search("sonic boom", rerank=False)
+    first = indexed.search("sonic boom", rerank=False, routing="adaptive")
     embeds_after_first = [c for c in fake_voyage.calls if "colours" in c or "texts" in c]
-    second = indexed.search("sonic boom", rerank=False)
+    second = indexed.search("sonic boom", rerank=False, routing="adaptive")
     embeds_after_second = [c for c in fake_voyage.calls if "colours" in c or "texts" in c]
     assert second == first
     assert len(embeds_after_first) == 2 and len(embeds_after_second) == 2  # multimodal + text, once each

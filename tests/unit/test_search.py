@@ -33,7 +33,7 @@ def indexed(engine, fake_mongo):
 
 
 def test_fuses_sources_and_returns_the_moment_not_the_scene_start(indexed):
-    (top, *_rest) = indexed.search("how many decibels was the sonic boom", top_k=3)
+    (top, *_rest) = indexed.search("how many decibels was the sonic boom", top_k=3, routing="adaptive")
     assert top["scene_id"] == 0
     assert top["moment"] == {"start": 9.0, "end": 12.0, "text": "the sonic boom measured 110 decibels"}
     assert top["moment_link"] == f"{URL}#t=9"  # deep link to the second it is said
@@ -43,7 +43,7 @@ def test_fuses_sources_and_returns_the_moment_not_the_scene_start(indexed):
 
 def test_visual_question_routes_to_visual_lists_and_finds_silent_scenes(indexed):
     # No transcript sentence matches -> reranker relevance ~0 -> "about what's shown".
-    results = indexed.search("jet silhouette against grey clouds", top_k=3)
+    results = indexed.search("jet silhouette against grey clouds", top_k=3, routing="adaptive")
     assert results.speech_confidence == 0.0
     silent = next(r for r in results if r["scene_id"] == 2)  # only the visual lists know it
     assert silent["moment"] is None and silent["ranks"] == {"visual": 1}
@@ -51,7 +51,7 @@ def test_visual_question_routes_to_visual_lists_and_finds_silent_scenes(indexed)
 
 
 def test_speech_question_routes_to_speech_lists(indexed):
-    results = indexed.search("sonic boom measured decibels", top_k=3)
+    results = indexed.search("sonic boom measured decibels", top_k=3, routing="adaptive")
     assert results.speech_confidence == 1.0
     assert results[0]["scene_id"] == 0 and "decibels" in results[0]["moment"]["text"]
     assert 2 not in [r["scene_id"] for r in results], "visual-only scenes don't compete with confident speech"
@@ -72,6 +72,26 @@ def test_invalid_routing_is_rejected(indexed):
         indexed.search("q", routing="magic")
 
 
+def test_default_is_scene_first_ranking_with_the_reranker_picking_the_moment(indexed):
+    results = indexed.search("how many decibels was the sonic boom", top_k=3)
+    assert [r["scene_id"] for r in results] == [0, 1]  # the joint vector's order, untouched by the reranker
+    assert results[0]["moment"]["text"] == "the sonic boom measured 110 decibels"
+    assert results[0]["moment_link"] == f"{URL}#t=9"
+    assert results.speech_confidence is None
+    assert all(set(r["ranks"]) <= {"scene", "rerank"} for r in results)
+
+
+def test_default_falls_back_to_fusion_when_scenes_have_no_joint_vectors(indexed, fake_mongo):
+    fake_mongo.collection.results_by_index["cinematlas_scene_index"] = []  # ingested before scene vectors
+    results = indexed.search("sonic boom decibels")
+    assert results and results.speech_confidence is not None
+
+
+def test_weights_or_sources_without_routing_keep_fusion(indexed):
+    assert "transcript" in indexed.search("sonic boom", weights={"transcript": 1})[0]["ranks"]
+    assert indexed.search("sonic boom decibels", sources=("scene", "transcript")).speech_confidence is not None
+
+
 def test_one_multimodal_query_embedding_serves_visual_and_scene(indexed, fake_voyage):
     indexed.search("sonic boom")
     assert len([c for c in fake_voyage.calls if "colours" in c]) == 1
@@ -84,7 +104,7 @@ def test_sources_can_be_restricted(indexed, fake_mongo):
 
 
 def test_without_rerank_moment_comes_from_lexical_overlap(indexed, fake_voyage):
-    (top, *_r) = indexed.search("sonic boom decibels", rerank=False)
+    (top, *_r) = indexed.search("sonic boom decibels", rerank=False, routing="adaptive")
     assert top["moment"]["start"] == 9.0 and top["relevance"] is None
     assert not [c for c in fake_voyage.calls if "rerank" in c]
 
@@ -133,14 +153,14 @@ def fusion_row(doc, **ranks):
 
 
 def test_native_rank_fusion_is_one_round_trip_with_the_same_ranking(indexed, fake_mongo):
-    python_path = [r["scene_id"] for r in indexed.search("sonic boom decibels", rerank=False)]
+    python_path = [r["scene_id"] for r in indexed.search("sonic boom decibels", rerank=False, routing="adaptive")]
 
     fake_mongo.collection.pipelines.clear()
     fake_mongo.collection.native_fusion_rows = [
         fusion_row(AIR, visual=3, scene=1, transcript=1), fusion_row(HIKE, visual=2, scene=2, transcript=2),
         fusion_row(SILENT, visual=1)]
     indexed.native_fusion = None  # re-detect
-    native = indexed.search("sonic boom decibels", rerank=False)
+    native = indexed.search("sonic boom decibels", rerank=False, routing="adaptive")
 
     assert [r["scene_id"] for r in native] == python_path, "native and client-side fusion must agree"
     assert indexed.native_fusion is True
@@ -192,8 +212,8 @@ def test_uncalibrated_reranker_steps_down_to_fixed_fusion_and_says_so_once(index
     monkeypatch.setattr(engine_module, "_WARNED", set())
     indexed.rerank_model = "rerank-2.5-lite"  # different score scale: no calibration on record
     with caplog.at_level(logging.WARNING, logger="cinematlas"):
-        first = indexed.search("jet silhouette against grey clouds")
-        indexed.search("sonic boom decibels")
+        first = indexed.search("jet silhouette against grey clouds", routing="adaptive")
+        indexed.search("sonic boom decibels", routing="adaptive")
     assert first.speech_confidence is None, "never route on an uncalibrated score scale"
     assert first.weights["visual"] == 0.25 and first.weights["rerank"] == 2.0  # fixed defaults
     assert [r.message for r in caplog.records].count(
@@ -204,7 +224,7 @@ def test_uncalibrated_reranker_steps_down_to_fixed_fusion_and_says_so_once(index
 def test_custom_calibration_is_honoured(indexed):
     indexed.rerank_model = "rerank-2.5-lite"
     indexed.routing_thresholds = (0.0, 0.01)  # any matching sentence counts as "about speech"
-    assert indexed.search("sonic boom decibels").speech_confidence == 1.0
+    assert indexed.search("sonic boom decibels", routing="adaptive").speech_confidence == 1.0
 
 
 @pytest.mark.parametrize("bad", [(0.6, 0.4), (-0.1, 0.5), (0.2, 1.5)])

@@ -119,24 +119,50 @@ coming from the painted-on words. It was coming from the transcript, inside the 
 The prediction failed, and the failure is the strongest evidence in this post. We gave the finding a
 real chance to break, and it held.
 
-## What the reranker is actually for
+## Testing it on video we never saw
 
-If the joint vector finds the scene, is the reranker useless? No. It does a different job.
+Everything so far came from one benchmark: 60 questions we wrote ourselves, on six interviews about one
+aircraft, with the router's thresholds tuned on those same questions. That's enough to say which gaps are
+real on this set. It isn't enough to say the finding holds anywhere else.
 
-A scene is up to 30 seconds long. The product promise is *the second*. The reranker scores every
-sentence in the candidate scenes and picks the one that answers the question, so a result links to
-`#t=431` and not to the start of a clip. In our benchmark, when the top scene is right, the returned
-moment is right **76%** of the time.
+So we built a second benchmark designed to break it:
 
-So each part has a clear job:
+- **A different domain:** six NASA videos about life on the space station, including a silent 15-minute
+  walkthrough, an astronaut answering questions about space toilets, science demos and a food lab. 386
+  scenes, six times the first corpus.
+- **No burned-in captions.**
+- **Questions we didn't write.** An agent saw only the keyframes and transcripts, never the code or any
+  results, and wrote 40 speech and 40 visual questions.
+- **Nothing tuned on it.** Weights and thresholds stayed exactly as the first corpus set them.
 
-- **The joint vector finds the scene.** That's where the two modalities are fused.
-- **The reranker finds the second.** That's precision within a scene, not choosing between modalities.
-- **The router is optional.** It's a tie, so it stays as a default, not a requirement.
+Before running it, we wrote down the decision it would settle: *if ranking by the joint vector alone is
+not significantly worse than the router on either corpus, and it's faster, it becomes the default.*
 
-We tested the "cleaner" design too: rank by the joint vector alone and use the reranker only to pick the
-moment. Same scene accuracy, same moment accuracy, slower. So we didn't ship a rewrite to make the
-diagram prettier. The finding changed the story, not the code.
+| Mean Hit@1 | First corpus | Held-out corpus |
+| --- | --- | --- |
+| merged rankings, tuned + reranked | 0.65 | 0.21 |
+| **one joint vector** | **0.83** | **0.62** |
+| joint vector vs merged: disputed questions | 14 vs 3, p = 0.013 | **40 vs 7, p < 0.001** |
+
+The finding didn't just survive; the gap got wider. On unfamiliar video, merged rankings fell apart
+(0.21), and the joint vector won 40 of the 47 questions where the two disagreed.
+
+And the rule settled the default. Ranking by the joint vector tied the router again (14 vs 11, p = 0.69)
+at under half the latency.
+
+## What each part is for now
+
+- **The joint vector finds the scene.** That's where the two modalities are fused, and it's the default
+  ranking.
+- **The reranker finds the second.** A scene can run 30 seconds, and the promise is *the second*. The
+  reranker scores only the sentences inside the scenes the vector found, and picks the one that answers.
+- **The router is opt-in.** Here's the honest part: it ties overall, but not everywhere. Ranking by the
+  joint vector is better on questions about what was *shown* (9 vs 0 on the held-out set, p = 0.004). The
+  router leans ahead on what was *said*, in both corpora, though neither gap is significant on its own.
+  If your users mostly ask about speech, `routing="adaptive"` is one argument away.
+
+We could have tuned the default until the speech gap closed. But the held-out set only means something if
+nobody tunes on it, so the default is what the rule we wrote down said it should be.
 
 ## The lesson that transfers
 
@@ -156,10 +182,12 @@ die, and where teams end up bolting on routers, classifiers and per-query weight
 
 ## What we don't know yet
 
-60 questions, 6 videos, one program, written by us. The paired test tells us which gaps are real, not
-whether they generalize. Lectures, sports, surveillance and silent footage could all behave differently,
-and the router's thresholds were tuned on this same set. Everything here reproduces from the repo, and
-the benchmark, caption ablation and limits are in
+Two corpora, both NASA, 140 questions in total. The paired test tells us which gaps are real; two domains
+are better than one, but lectures, sports, surveillance and meetings could still behave differently. The
+router's per-category lean toward speech is consistent but not yet significant, and more speech-heavy
+data would settle it. Adaptive routing also isn't perfectly repeatable: between two runs it changed its
+answer on one held-out question. Everything here reproduces from the repo; both corpora, the caption ablation and
+the limits are in
 [bench/RESULTS.md](https://github.com/ranfysvalle02/cinematlas/blob/main/bench/RESULTS.md). If you run
 it on your own video and it breaks, we want to know.
 
