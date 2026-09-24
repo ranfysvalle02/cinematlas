@@ -78,6 +78,27 @@ Results are plain dicts underneath (`json.dumps` works). Cinematlas doesn't pick
 
 ---
 
+## Examples
+
+Runnable scripts in [`examples/`](https://github.com/ranfysvalle02/cinematlas/tree/main/examples). Put
+`MONGODB_URI` and `VOYAGE_API_KEY` in `.env`; no other keys are needed. Examples 1–4 search the benchmark
+corpus (six NASA interviews in `cinematlas_bench`); swap in your own collection name to search yours.
+
+| | Example | Shows |
+| --- | --- | --- |
+| Basic | [`01_search.py`](https://github.com/ranfysvalle02/cinematlas/blob/main/examples/01_search.py) | A question in, the second that answers it out |
+| Basic | [`02_fast_scene_search.py`](https://github.com/ranfysvalle02/cinematlas/blob/main/examples/02_fast_scene_search.py) | The joint vector alone (~65 ms) against the full `search()` |
+| Advanced | [`03_why_it_ranked.py`](https://github.com/ranfysvalle02/cinematlas/blob/main/examples/03_why_it_ranked.py) | How a question is read as said or shown, and why each hit ranked |
+| Advanced | [`04_answer_with_ollama.py`](https://github.com/ranfysvalle02/cinematlas/blob/main/examples/04_answer_with_ollama.py) | A cited answer from a local LLM ([Ollama](https://ollama.com)), each citation a deep link |
+| Advanced | [`05_ingest_your_video.py`](https://github.com/ranfysvalle02/cinematlas/blob/main/examples/05_ingest_your_video.py) | Index any URL or file with live progress, then search it |
+| Advanced | [`06_fastapi_app.py`](https://github.com/ranfysvalle02/cinematlas/blob/main/examples/06_fastapi_app.py) | A video upload + search API in about 20 lines |
+
+```bash
+uv run python examples/01_search.py "how loud is a sonic boom?"
+```
+
+---
+
 ## How it works
 
 ```
