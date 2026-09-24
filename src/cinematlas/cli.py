@@ -39,7 +39,8 @@ def _build_parser() -> argparse.ArgumentParser:
     setup.add_argument("--update", action="store_true",
                        help="also update outdated indexes in place (e.g. add quantization)")
 
-    ing = sub.add_parser("ingest", help="Ingest a URL (scheme optional), a local file, or '-' for stdin")
+    ing = sub.add_parser("ingest", help="Ingest a URL (YouTube, direct link, s3://, gs://), a local file, "
+                                        "or '-' for stdin")
     ing.add_argument("source")
     ing.add_argument("--video-id")
     ing.add_argument("--filename", help="Display name for file/stdin uploads")

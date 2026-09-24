@@ -47,7 +47,7 @@ their own data instead of taking it on trust.
 | **Documentation & storytelling** | **9** | Three documents with distinct jobs: README (use it), blog (the story, including where we were wrong), paper (methods, predictions, limits). Every number traces to a generated `RESULTS.md`. |
 | **Reproducibility** | **8.5** | Every table regenerates from `bench/`; corpora, questions and distractors are committed. It still needs an Atlas cluster, a Voyage key and hours of embedding. |
 | **External validity** | **8** | Four corpora in three domains: video, space photography and museum art (0.95 vs 0.62). The result survives terse from-memory queries (0.80 vs 0.70 vs the strongest merge) and messy typing (0.84 vs 0.61). Still no real users, and the long-record tests pad real descriptions rather than using real long documents. |
-| **Production readiness** | **7.5** | Safe URL handling, idempotent setup, gapless re-ingest, per-record failure isolation. Deductions: one embedding provider, a young `core` API, and chunk-level fusion re-embeds the image with every chunk, which multiplies embedding cost. |
+| **Production readiness** | **8** | Safe URL handling, idempotent setup, gapless re-ingest, per-record failure isolation. Sources don't hinge on yt-dlp: `s3://` and `gs://` go through the cloud SDKs, direct and presigned links stream with every redirect SSRF-checked. Deductions: one embedding provider, a young `core` API, and chunk-level fusion re-embeds the image with every chunk, which multiplies embedding cost. |
 | **Overall** | **9** | The core claim now survives every objection we could test without real users. |
 
 ---

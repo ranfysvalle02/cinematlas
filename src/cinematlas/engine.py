@@ -358,8 +358,20 @@ class Cinematlas:
 
     # ------------------------------------------------------------------ ingest steps (seams; see module doc)
     def _download_and_extract_media(self, video_url: str, temp_dir: str) -> tuple[str, str | None]:
-        """Download with yt-dlp and extract a speech-ready audio track."""
-        video_path = self._download_video(video_url, temp_dir, max_download_mb=self.max_download_mb)
+        """Fetch the video, then extract a speech-ready audio track.
+
+        ``s3://`` and ``gs://`` go through the cloud SDK with your credentials; direct links to video
+        files (including presigned URLs) stream straight to disk with every redirect SSRF-checked;
+        only pages such as YouTube need yt-dlp.
+        """
+        if media.is_cloud_uri(video_url):
+            video_path = media.download_object(video_url, temp_dir, max_download_mb=self.max_download_mb,
+                                               s3_client=self.s3_client)
+        elif media.is_direct_file(video_url):
+            video_path = media.download_direct(video_url, temp_dir, max_download_mb=self.max_download_mb,
+                                               validate=self._validate_remote_url)
+        else:
+            video_path = self._download_video(video_url, temp_dir, max_download_mb=self.max_download_mb)
         return video_path, self._extract_audio(video_path, temp_dir)
 
     _download_video = staticmethod(media.download_video)

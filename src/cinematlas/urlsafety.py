@@ -18,17 +18,24 @@ def validate_remote_url(source: str, *, allow_private: bool = False) -> str:
 
     Private, loopback, link-local and reserved addresses are refused unless ``allow_private``: when
     user-supplied URLs reach ingestion, this blocks SSRF against internal services and cloud metadata
-    endpoints (e.g. 169.254.169.254). Redirects followed by yt-dlp are not re-checked; put an egress
-    proxy in front if you accept arbitrary URLs from the public.
+    endpoints (e.g. 169.254.169.254). Direct video links re-check every redirect with this function;
+    redirects followed by yt-dlp (pages such as YouTube) are not, so put an egress proxy in front if you
+    accept arbitrary page URLs from the public. ``s3://`` and ``gs://`` are fetched by the cloud SDK with
+    your own credentials, so there is no host to check.
     """
     url = normalize_source_url(source)
     parsed = urllib.parse.urlparse(url)
+    if parsed.scheme in ("s3", "gs"):  # fetched by the cloud SDK with your credentials: no host to SSRF-check
+        if not parsed.netloc or not parsed.path.strip("/"):
+            raise IngestionError(f"Expected {parsed.scheme}://bucket/key, got {source!r}")
+        return url
     if "://" not in url:
         raise IngestionError(f"No such file or URL: {source!r}")
     if os.path.splitext(parsed.hostname or "")[1].lower() in VIDEO_EXTENSIONS and "/" not in source:
         raise IngestionError(f"No such file: {source!r}")  # "clip.mp4" is a missing file, not a host
     if parsed.scheme not in ("http", "https"):
-        raise IngestionError(f"Unsupported URL scheme {parsed.scheme!r}; use http(s) or ingest_file()")
+        raise IngestionError(f"Unsupported URL scheme {parsed.scheme!r}; use http(s), s3://, gs:// "
+                             "or ingest_file()")
     if not parsed.hostname:
         raise IngestionError(f"URL has no host: {source!r}")
     if not allow_private:

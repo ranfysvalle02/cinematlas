@@ -162,5 +162,5 @@ def test_download_size_cap_is_passed_to_ytdlp(engine, monkeypatch, tmp_path):
     monkeypatch.setitem(sys.modules, "yt_dlp", types.SimpleNamespace(YoutubeDL=Recorder))
     engine.max_download_mb = 50
     monkeypatch.setattr(engine, "_extract_audio", lambda *a: None)
-    engine._download_and_extract_media("https://b.com/v.mp4", str(tmp_path))
+    engine._download_and_extract_media("https://b.com/watch/keynote", str(tmp_path))  # a page: yt-dlp's job
     assert captured["max_filesize"] == 50 * 1024 * 1024

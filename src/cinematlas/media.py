@@ -9,6 +9,8 @@ import os
 import shutil
 import subprocess
 import time
+import urllib.parse
+import urllib.request
 from collections.abc import Callable, Sequence
 from typing import IO, Any, Union
 
@@ -233,3 +235,105 @@ def extract_keyframes(video_path: str, spans: Sequence[tuple[float, float]], vid
     finally:
         cap.release()
     return scenes
+
+
+# ---------------------------------------------------------------------- remote sources without yt-dlp
+VIDEO_SUFFIXES = (".mp4", ".mov", ".m4v", ".webm", ".mkv", ".avi", ".mpg", ".mpeg", ".ts", ".flv", ".wmv")
+CLOUD_SCHEMES = ("s3", "gs")
+
+
+def is_cloud_uri(url: str) -> bool:
+    return urllib.parse.urlparse(url).scheme in CLOUD_SCHEMES
+
+
+def is_direct_file(url: str) -> bool:
+    """An http(s) link to a video file (including presigned cloud URLs), not a page for yt-dlp."""
+    parsed = urllib.parse.urlparse(url)
+    return parsed.scheme in ("http", "https") and parsed.path.lower().endswith(VIDEO_SUFFIXES)
+
+
+def _target(temp_dir: str, name: str) -> str:
+    suffix = os.path.splitext(name)[1].lower()
+    return os.path.join(temp_dir, f"input{suffix if suffix in VIDEO_SUFFIXES else '.mp4'}")
+
+
+def _too_big(size: int | None, max_download_mb: int | None) -> bool:
+    return bool(max_download_mb and size and size > max_download_mb * 1024 * 1024)
+
+
+def download_direct(url: str, temp_dir: str, *, max_download_mb: int | None = DEFAULT_MAX_DOWNLOAD_MB,
+                    validate: Callable[[str], str] | None = None, timeout_s: float = 60) -> str:
+    """Stream a direct video link to disk, capped at ``max_download_mb``.
+
+    Every redirect is re-checked with ``validate`` (the SSRF guard), which the yt-dlp path can't do.
+    """
+    class CheckedRedirects(urllib.request.HTTPRedirectHandler):
+        def redirect_request(self, req, fp, code, msg, headers, newurl):  # noqa: ANN001
+            if validate:
+                validate(newurl)
+            return super().redirect_request(req, fp, code, msg, headers, newurl)
+
+    opener = urllib.request.build_opener(CheckedRedirects)
+    request = urllib.request.Request(url, headers={"User-Agent": "cinematlas"})
+    try:
+        with opener.open(request, timeout=timeout_s) as response:
+            if "text/html" in (response.headers.get("Content-Type") or ""):
+                raise IngestionError(f"'{url}' returned a web page, not a video file")
+            size = int(response.headers.get("Content-Length") or 0) or None
+            if _too_big(size, max_download_mb):
+                raise IngestionError(f"'{url}' is {size / 2**20:.0f} MiB, over max_download_mb={max_download_mb}")
+            path = _target(temp_dir, urllib.parse.urlparse(url).path)
+            written, limit = 0, (max_download_mb or 0) << 20
+            with open(path, "wb") as out:
+                while chunk := response.read(UPLOAD_CHUNK_BYTES):
+                    written += len(chunk)
+                    if limit and written > limit:
+                        raise IngestionError(f"'{url}' exceeds max_download_mb={max_download_mb}")
+                    out.write(chunk)
+    except IngestionError:
+        raise
+    except Exception as e:
+        raise IngestionError(f"Download failed for '{url}': {e}") from e
+    if written == 0:
+        raise IngestionError(f"'{url}' returned no data")
+    return path
+
+
+def download_object(uri: str, temp_dir: str, *, max_download_mb: int | None = DEFAULT_MAX_DOWNLOAD_MB,
+                    s3_client: Any = None, gcs_client: Any = None) -> str:
+    """Fetch ``s3://bucket/key`` or ``gs://bucket/object`` with the cloud SDK, using ambient credentials."""
+    parsed = urllib.parse.urlparse(uri)
+    bucket, key = parsed.netloc, parsed.path.lstrip("/")
+    if not bucket or not key:
+        raise IngestionError(f"Expected {parsed.scheme}://bucket/key, got {uri!r}")
+    path = _target(temp_dir, key)
+    try:
+        if parsed.scheme == "s3":
+            if s3_client is None:
+                try:
+                    import boto3
+                except ImportError as e:
+                    raise IngestionError("s3:// sources need boto3: pip install 'cinematlas[s3]'") from e
+                s3_client = boto3.client("s3")
+            size = s3_client.head_object(Bucket=bucket, Key=key).get("ContentLength")
+            if _too_big(size, max_download_mb):
+                raise IngestionError(f"{uri} is {size / 2**20:.0f} MiB, over max_download_mb={max_download_mb}")
+            s3_client.download_file(bucket, key, path)
+        else:
+            if gcs_client is None:
+                try:
+                    from google.cloud import storage
+                except ImportError as e:
+                    raise IngestionError(
+                        "gs:// sources need google-cloud-storage: pip install 'cinematlas[gcs]'") from e
+                gcs_client = storage.Client()
+            blob = gcs_client.bucket(bucket).blob(key)
+            blob.reload()
+            if _too_big(blob.size, max_download_mb):
+                raise IngestionError(f"{uri} is {blob.size / 2**20:.0f} MiB, over max_download_mb={max_download_mb}")
+            blob.download_to_filename(path)
+    except IngestionError:
+        raise
+    except Exception as e:
+        raise IngestionError(f"Could not fetch {uri}: {e}") from e
+    return path

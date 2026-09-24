@@ -253,10 +253,18 @@ uv run python examples/photos.py "a rover's tracks on red sand" --center JPL
 All of them accept `video_id=`. Every hit carries `moment` (`{start, end, text}`), `moment_link`
 (YouTube `?t=431s`, files `#t=431`), `ranks`, `relevance` and the scene's fields.
 
-`ingest()` accepts a URL (YouTube or any file link, scheme optional), a path, `bytes`, a file object, or a
-FastAPI `UploadFile` / Flask `FileStorage`. Remote URLs are treated as untrusted: private addresses are
-refused, downloads are capped, and signed-URL credentials are stripped before storage. Re-ingesting a
-video replaces it without a gap.
+`ingest()` accepts:
+
+| Source | Fetched with |
+| --- | --- |
+| `s3://bucket/key`, `gs://bucket/object` | the cloud SDK and your ambient credentials (`cinematlas[s3]`, `cinematlas[gcs]`) |
+| a direct video link, including presigned S3 / GCS / Azure URLs | a streaming download, every redirect SSRF-checked |
+| a page such as YouTube | yt-dlp |
+| a path, `bytes`, a file object, a FastAPI `UploadFile` / Flask `FileStorage` | streamed to disk |
+
+Remote URLs are treated as untrusted: private addresses are refused, downloads are capped at
+`max_download_mb` (cloud objects are checked before downloading), and signed-URL credentials are stripped
+before storage. Re-ingesting a video replaces it without a gap.
 
 ---
 
