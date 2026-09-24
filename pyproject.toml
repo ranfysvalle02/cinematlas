@@ -1,6 +1,6 @@
 [project]
 name = "cinematlas"
-version = "0.4.3"
+version = "0.4.4"
 description = "Search inside video down to the second: one joint keyframe+speech vector per scene on MongoDB Atlas and Voyage AI, with sentence-level reranking."
 readme = "README.md"
 license = "MIT"
@@ -41,6 +41,7 @@ all = ["cinematlas[s3,openai,whisper]"]
 [project.urls]
 Homepage = "https://github.com/ranfysvalle02/cinematlas"
 Documentation = "https://github.com/ranfysvalle02/cinematlas#readme"
+Story = "https://github.com/ranfysvalle02/cinematlas/blob/main/blog.md"
 Benchmark = "https://github.com/ranfysvalle02/cinematlas/blob/main/bench/RESULTS.md"
 Issues = "https://github.com/ranfysvalle02/cinematlas/issues"
 
