@@ -14,6 +14,7 @@ Extend it with your own :class:`Part` (what goes into the vector) or :class:`Loa
 come from); see :mod:`cinematlas.core.registry`.
 """
 
+from .chunking import Paragraphs, Semantic
 from .collection import AddResult, Atlas, Collection, split_sentences
 from .evaluate import EvalReport, mcnemar
 from .loaders import ImageFolder, JSONLines, Loader, PDFPages, Screenshots, Slides
@@ -34,8 +35,10 @@ __all__ = [
     "Joint",
     "Loader",
     "PDFPages",
+    "Paragraphs",
     "Part",
     "Screenshots",
+    "Semantic",
     "Slides",
     "Text",
     "get_field",

@@ -530,13 +530,45 @@ def test_merged_search_and_evaluate_accept_a_fusion_choice(voyage):
 
 
 # ------------------------------------------------------------------ chunk= : fuse within a chunk, chunk across a record
-def test_split_chunks_packs_paragraphs_then_sentences_then_hard_cuts():
-    from cinematlas.core.parts import split_chunks
+def test_paragraph_chunker_keeps_each_paragraph_whole():
+    from cinematlas.core import Paragraphs
 
-    assert split_chunks("a.\n\nb.\n\nc.", 200) == ["a.\n\nb.\n\nc."]  # small paragraphs share a chunk
-    long = "One sentence here. " * 20
-    assert all(len(c) <= 100 for c in split_chunks(long, 100)) and len(split_chunks(long, 100)) > 3
-    assert split_chunks("x" * 250, 100) == ["x" * 100, "x" * 100, "x" * 50]
+    hubble = "Hubble was serviced in December 1993 by the crew of STS-61. " * 3
+    rover = "The rover drove twelve kilometres across the crater floor to the delta. " * 3
+    two = f"{hubble.strip()}\n\n{rover.strip()}"
+    assert Paragraphs(1600)(two) == two.split("\n\n")  # never packed together, however much room is left
+    assert Paragraphs(400)("Heading\n\n" + "A" * 300) == ["Heading\n\n" + "A" * 300]  # a one-liner joins its neighbour
+    long = " ".join(f"Sentence number {i} is here." for i in range(40))
+    assert all(len(c) <= 300 for c in Paragraphs(300)(long)) and len(Paragraphs(300)(long)) > 3
+
+
+class TopicVoyage:
+    """Sentence embeddings that encode the sentence's topic word, so topic changes are exact."""
+
+    def embed(self, texts, model, input_type):
+        topics = ["hubble", "rover", "food"]
+        return SimpleNamespace(embeddings=[[float(t in x.lower()) for t in topics] for x in texts])
+
+
+def test_semantic_chunker_cuts_where_the_topic_changes():
+    from cinematlas.core import Semantic
+
+    text = " ".join([*(f"The hubble telescope fact {i} is interesting." for i in range(4)),
+                     *(f"The rover drove over rock {i} today." for i in range(4)),
+                     *(f"Space food item {i} was tasty." for i in range(4))])
+    chunks = Semantic(400, min_chars=50, client=TopicVoyage())(text)
+    assert [("hubble" in c, "rover" in c, "food" in c.lower()) for c in chunks] == [
+        (True, False, False), (False, True, False), (False, False, True)]
+
+
+def test_semantic_chunker_borrows_the_collections_client(atlas, mongo):
+    from cinematlas.core import Semantic
+
+    atlas.vo.embed = TopicVoyage().embed
+    coll = atlas.collection("docs", embed=Text("body", chunk=Semantic(300, min_chars=40)), key="id")
+    body = " ".join(["The hubble telescope is here."] * 12 + ["The rover is there."] * 12)
+    coll.add([{"id": "d", "body": body}])
+    assert len(mongo.docs) >= 2 and all(("hubble" in d["body"]) != ("rover" in d["body"]) for d in mongo.docs)
 
 
 def test_chunk_needs_a_key_and_a_top_level_field(atlas):
@@ -551,9 +583,8 @@ def test_chunk_needs_a_key_and_a_top_level_field(atlas):
 class ChunkMongo(Mongo):
     def delete_many(self, flt):
         before = len(self.docs)
-        keep = lambda d: not (d.get("_parent") in flt["_parent"]["$in"] and d["_key"] not in flt["_key"]["$nin"]  # noqa: E731
-                              and d.get("_chunk", -1) >= flt["_chunk"]["$gte"])
-        self.docs = [d for d in self.docs if keep(d)]
+        self.docs = [d for d in self.docs
+                     if not (d.get("_parent") == flt["_parent"] and d.get("_chunk", -1) >= flt["_chunk"]["$gte"])]
         return SimpleNamespace(deleted_count=before - len(self.docs))
 
     def distinct(self, key, flt):
@@ -585,3 +616,15 @@ def test_chunked_search_returns_each_records_best_chunk_once(voyage):
     hits = coll.search("the answer", k=2)
     assert [(h["_key"], h["chunk"]) for h in hits] == [("a", 2), ("b", 1)]
     assert hits[0].text == "the answer"  # the matching chunk is the moment
+
+
+def test_chunks_of_different_records_in_one_write_batch_all_survive(voyage, monkeypatch):
+    """Regression: stale-chunk cleanup once used the batch's smallest chunk number, so record B's chunk 0
+    deleted record A's earlier chunks whenever A's tail and B's start shared a write batch."""
+    monkeypatch.setattr(core_collection.time, "sleep", lambda _s: None)
+    mongo = ChunkMongo()
+    coll = Atlas(mongo_client=Client(mongo), voyage_client=voyage).collection(
+        "docs", embed=Text("body", chunk=120), key="id")
+    body = "\n\n".join(f"Paragraph {i} " + "word " * 20 for i in range(5))
+    coll.add([{"id": "a", "body": body}, {"id": "b", "body": body}], batch_size=3)  # batches straddle records
+    assert sorted(d["_key"] for d in mongo.docs) == sorted([f"{r}#{i}" for r in "ab" for i in range(5)])

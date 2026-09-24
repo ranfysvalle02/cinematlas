@@ -34,7 +34,7 @@ from ..indexes import definition_drift, wait_until_queryable
 from .evaluate import EvalReport, mcnemar, normalize_questions, score
 from .fusion import MERGES
 from .loaders import Loader
-from .parts import EmbedInput, Joint, Part, as_joint, get_field, split_chunks
+from .parts import EmbedInput, Joint, Part, as_joint, get_field
 from .results import Hit, Hits
 
 logger = logging.getLogger("cinematlas")
@@ -252,13 +252,15 @@ class Collection:
         if not self.chunked:
             yield from records
             return
-        field_name, size = self.chunked.field, self.chunked.chunk
+        field_name, chunker = self.chunked.field, self.chunked.chunk
+        if getattr(chunker, "client", False) is None:  # a Semantic chunker borrows the collection's Voyage client
+            chunker.client = self.atlas.vo
         for record in records:
             text = record.get(field_name)
-            pieces = split_chunks(str(text), size) if text else [None]
+            pieces = (chunker(str(text)) or [None]) if text else [None]
             parent = get_field(record, self.key)
             for i, piece in enumerate(pieces):
-                yield {**record, field_name: piece, "_parent": parent, "_chunk": i}
+                yield {**record, field_name: piece, "_parent": parent, "_chunk": i, "_chunks": len(pieces)}
 
     def _label(self, record: Mapping[str, Any]) -> str:
         return str(get_field(record, self.key) if self.key else next(iter(record.values()), "?"))[:80]
@@ -295,10 +297,9 @@ class Collection:
     def _write(self, docs: list[dict[str, Any]]) -> None:
         if self.key:
             self.mongo.bulk_write([ReplaceOne({"_key": d["_key"]}, d, upsert=True) for d in docs], ordered=False)
-            if self.chunked:  # a re-added record may now have fewer chunks: drop the leftovers
-                parents = {d["_parent"] for d in docs}
-                self.mongo.delete_many({"_parent": {"$in": list(parents)}, "_key": {"$nin": [d["_key"] for d in docs]},
-                                        "_chunk": {"$gte": min(d["_chunk"] for d in docs)}})
+            if self.chunked:  # a re-added record may now have fewer chunks: drop its leftovers, per record
+                for parent, total in {d["_parent"]: d["_chunks"] for d in docs}.items():
+                    self.mongo.delete_many({"_parent": parent, "_chunk": {"$gte": total}})
         else:
             self.mongo.insert_many(docs)
 
