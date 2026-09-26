@@ -265,7 +265,7 @@ def build_match(video_ids: Sequence[str] = (), where: Mapping[str, str | Sequenc
     if video_ids:
         match["video_id"] = video_ids[0] if len(video_ids) == 1 else {"$in": list(video_ids)}
     for name, value in (where or {}).items():
-        values = [value] if isinstance(value, str) else list(value)
+        values = [value] if isinstance(value, str) else list(dict.fromkeys(value))
         match[f"metadata.{name}"] = values[0] if len(values) == 1 else {"$in": values}
     return match
 

@@ -26,10 +26,10 @@ def test_unreachable_mongo_is_reported_as_cinematlas_error(fake_voyage):
         Cinematlas("mongodb://127.0.0.1:1/?serverSelectionTimeoutMS=200", voyage_client=fake_voyage)
 
 
-def test_context_manager_closes_client(fake_mongo, fake_voyage):
+def test_context_manager_leaves_an_injected_client_open(fake_mongo, fake_voyage):
     with Cinematlas(mongo_client=fake_mongo, voyage_client=fake_voyage, ping=False):
         pass
-    assert fake_mongo.closed
+    assert not fake_mongo.closed  # the caller made it, the caller closes it
 
 
 # ------------------------------------------------------------- transcription

@@ -58,7 +58,7 @@ class RecordingQuery:
         self.eng, self.q, self.chain = eng, q, chain
 
     def __getattr__(self, name):
-        return lambda *a: RecordingQuery(self.eng, self.q, (*self.chain, (name, *a)))
+        return lambda *a, **k: RecordingQuery(self.eng, self.q, (*self.chain, (name, *a, *sorted(k.items()))))
 
     def run(self):
         self.eng.calls.append(("search", self.q, self.chain))
@@ -194,3 +194,20 @@ def test_progress_is_a_tqdm_bar_on_a_terminal_and_lines_otherwise():
             report(stage, {"count": 1})
     assert "5/5" in tty.getvalue() and "stored in Atlas" in tty.getvalue()
     assert pipe.getvalue().count("✓") == 5 and "5/5" not in pipe.getvalue()
+
+
+def test_meta_and_where_reach_ingest_and_search_and_declare_filters(run):
+    _, _, _, eng = run("--filter", "series", "ingest", "v.mp4", "--meta", "course=cs101", "--meta", "term=fall", "-q")
+    assert eng.calls[0][2]["metadata"] == {"course": "cs101", "term": "fall"}
+    assert eng.kwargs["filters"] == ("series",)
+    _, _, _, eng = run("search", "exam", "--where", "course=cs101", "--where", "term=fall,spring", "--format", "json")
+    assert ("where", ("course", "cs101"), ("term", ["fall", "spring"])) in eng.calls[0][2]
+    assert eng.kwargs["filters"] == ("course", "term")  # a --where field is declared for you
+
+
+def test_bad_key_value_pairs_and_bad_filters_are_errors_not_tracebacks(run, monkeypatch):
+    with pytest.raises(SystemExit, match="KEY=VALUE"):
+        run("ingest", "v.mp4", "--meta", "nope")
+    monkeypatch.setattr(RecordingEngine, "search", lambda self, q: (_ for _ in ()).throw(ValueError("bad filter")))
+    code, _, err, _ = run("search", "q")
+    assert code == 1 and "cinematlas: error: bad filter" in err

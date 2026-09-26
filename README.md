@@ -329,12 +329,15 @@ before storage. Re-ingesting a video replaces it without a gap.
 ```bash
 cinematlas doctor                        # checks the deployment and prints the exact fix for each problem
 cinematlas setup [--update]              # create indexes; --update upgrades them in place
-cinematlas ingest <url|path|->           # progress on stderr, JSON on stdout
-cinematlas search "<question>" [-k 5] [--by hybrid|adaptive|transcript|visual|text] [--format table|json|context]
+cinematlas ingest <url|path|-> [--meta course=cs101]    # progress on stderr, JSON on stdout
+cinematlas search "<question>" [-k 5] [--where course=cs101] [--video-id ID]
+                  [--by hybrid|adaptive|scene|transcript|visual|text] [--format table|json|context]
 cinematlas demo [--port 8765]            # local web app: add videos, search, jump to the second
 ```
 
-Global options: `--uri`, `--db`, `--collection`, `--transcript-mode`, `-v`.
+Global options: `--uri`, `--db`, `--collection`, `--transcript-mode`, `--filter FIELD`, `-v`. A field
+used in `--where` is declared as a filter automatically. Before the first search on a new field,
+declare it and run `cinematlas --filter course setup --update` so the indexes can filter on it.
 
 ## Atlas features used
 

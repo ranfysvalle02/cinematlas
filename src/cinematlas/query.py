@@ -23,7 +23,7 @@ from . import search as _search
 from . import tracing
 from ._utils import build_match
 from .indexes import DEFAULT_AUTO_INDEX, DEFAULT_SCENE_INDEX, DEFAULT_TRANSCRIPT_INDEX, DEFAULT_VISUAL_INDEX
-from .results import SearchResults
+from .results import Hits, SearchResults
 
 if TYPE_CHECKING:
     from .core.collection import Collection
@@ -127,10 +127,23 @@ class Query:
     __eq__ = object.__eq__
     __hash__ = object.__hash__
 
+    _results_type: type = list
+    _result_attributes: frozenset[str] = frozenset()  # set on instances after a run (e.g. speech_confidence)
+
     def __getattr__(self, name: str) -> Any:  # .top, .links, .to_context(), .speech_confidence, …
-        if name.startswith("_"):  # never run a query for a private or dunder probe (copy, pickle, IPython)
-            raise AttributeError(name)
+        # Only names the results actually have run the query: a typo (q.limt) or a library probing for
+        # an attribute (hasattr(q, "shape")) fails fast instead of costing a search.
+        if name.startswith("_") or not (hasattr(self._results_type, name) or name in self._result_attributes):
+            raise AttributeError(f"{type(self).__name__!r} has no attribute {name!r}")
         return getattr(self.run(), name)
+
+    # A query is a recipe over a live connection: a copy is the same recipe on the same engine, with its
+    # own lock and no cached results (the connection itself is never copied).
+    def __copy__(self) -> Any:
+        return self._with()
+
+    def __deepcopy__(self, memo: dict[int, Any]) -> Any:
+        return self._with()
 
     def __str__(self) -> str:
         return str(self.run())
@@ -153,6 +166,9 @@ class Query:
 @dataclasses.dataclass(frozen=True, eq=False, repr=False)
 class Search(Query):
     """A question plus how to answer it. Build it with the chainable methods; it runs when read."""
+
+    _results_type = SearchResults
+    _result_attributes = frozenset({"speech_confidence"})  # .weights is the builder; read .run().weights
 
     engine: Cinematlas
     text: str
@@ -197,6 +213,9 @@ class Search(Query):
 
     def weights(self, **weights: float) -> Search:
         """Fixed-weight fusion; unspecified sources keep :data:`~cinematlas.search.DEFAULT_WEIGHTS`."""
+        unknown = set(weights) - set(_search.DEFAULT_WEIGHTS)
+        if unknown:
+            raise ValueError(f"weights are per source, among {sorted(_search.DEFAULT_WEIGHTS)}; got {sorted(unknown)}")
         return self._with(fusion_weights=tuple(weights.items()))
 
     # ------------------------------------------------------------------ execution
@@ -251,6 +270,9 @@ class Search(Query):
 @dataclasses.dataclass(frozen=True, eq=False, repr=False)
 class RecordSearch(Query):
     """A search over a :class:`cinematlas.core.Collection`, ranked by each record's joint vector."""
+
+    _results_type = Hits  # core.RecordHits' public surface is the shared base's, plus .display
+    _result_attributes = frozenset({"display"})
 
     collection: Collection
     query: Any  # text, Image(...), a PIL image, or a list mixing them

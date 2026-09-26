@@ -163,6 +163,10 @@ def definition_drift(current: dict[str, Any] | None, desired: dict[str, Any]) ->
             for key, value in want.items():
                 if have.get(key) != value:
                     diffs.append(f"{want['path']}.{key}: {have.get(key)!r} -> {value!r}")
+        wanted_paths = {f["path"] for f in desired["fields"]}
+        for path in by_path:  # a metadata filter that is no longer declared (filters are ours, not server-added)
+            if isinstance(path, str) and path.startswith("metadata.") and path not in wanted_paths:
+                diffs.append(f"{path}: filter no longer declared")
     else:  # Atlas Search: mappings
         have_m, want_m = current.get("mappings", {}), desired["mappings"]
         if have_m.get("dynamic") != want_m.get("dynamic"):
@@ -173,6 +177,9 @@ def definition_drift(current: dict[str, Any] | None, desired: dict[str, Any]) ->
                 diffs.append(f"mappings.fields.{field}: missing")
                 continue
             diffs.extend(_mapping_drift(f"mappings.fields.{field}", have, spec))
+        extra = set(have_m.get("fields", {}).get("metadata", {}).get("fields", {})) - set(
+            want_m.get("fields", {}).get("metadata", {}).get("fields", {}))
+        diffs.extend(f"mappings.fields.metadata.fields.{f}: filter no longer declared" for f in sorted(extra))
     return tuple(diffs)
 
 

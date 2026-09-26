@@ -46,17 +46,22 @@ class Usage:
                 if isinstance(value, int):
                     setattr(m, name, getattr(m, name) + value)
 
+    def _models(self) -> list[tuple[str, ModelUsage]]:
+        """A consistent copy, safe to iterate while other threads record."""
+        with self._lock:
+            return [(k, ModelUsage(**vars(v))) for k, v in self.models.items()]
+
     @property
     def calls(self) -> int:
-        return sum(m.calls for m in self.models.values())
+        return sum(m.calls for _, m in self._models())
 
     @property
     def total_tokens(self) -> int:
-        return sum(m.total_tokens for m in self.models.values())
+        return sum(m.total_tokens for _, m in self._models())
 
     @property
     def image_pixels(self) -> int:
-        return sum(m.image_pixels for m in self.models.values())
+        return sum(m.image_pixels for _, m in self._models())
 
     def snapshot(self) -> dict[str, dict[str, int]]:
         with self._lock:
@@ -80,7 +85,7 @@ class Usage:
         for text models ``per_m_tokens`` applies to ``total_tokens``.
         """
         total = 0.0
-        for model, m in self.models.items():
+        for model, m in self._models():
             p = prices.get(model)
             if not p:
                 continue
@@ -89,11 +94,12 @@ class Usage:
         return total
 
     def __str__(self) -> str:
-        if not self.models:
+        models = self._models()
+        if not models:
             return "Voyage usage: no calls"
         parts = [f"{name}: {m.calls} calls, {m.inputs} inputs, {m.total_tokens:,} tokens"
                  + (f", {m.image_pixels / 1e6:,.1f}M pixels" if m.image_pixels else "")
-                 for name, m in self.models.items()]
+                 for name, m in models]
         return "Voyage usage: " + "; ".join(parts)
 
 
@@ -120,6 +126,8 @@ class MeteredVoyage:
         return response
 
     def __getattr__(self, name: str) -> Any:
+        if name in ("client", "usage"):  # not set yet (copy, unpickling): don't recurse
+            raise AttributeError(name)
         return getattr(self.client, name)
 
     def __setattr__(self, name: str, value: Any) -> None:
@@ -161,6 +169,8 @@ def with_retries(call: Callable[[], Any], *, expect: int, retries: int = 3,
     batch would put vectors on the wrong records). Returns ``(embeddings, None)``, or ``(None, error)``
     once every attempt failed. Waits between attempts come from :func:`backoff`.
     """
+    if retries < 1:
+        raise ValueError(f"retries must be >= 1 (it counts attempts), got {retries!r}")
     error = None
     for attempt in range(1, retries + 1):
         try:

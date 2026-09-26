@@ -39,7 +39,7 @@ def test_a_standalone_engine_owns_its_atlas(fake_mongo, fake_voyage):
     records = eng.atlas.collection("notes", embed=Text("body"))
     assert records.atlas.usage is eng.usage  # video and records bill to the same meter
     eng.close()
-    assert fake_mongo.closed
+    assert not fake_mongo.closed  # injected: the caller's to close
 
 
 # ---------------------------------------------------------------- one retry path
@@ -157,3 +157,60 @@ def test_concurrent_reads_of_one_query_run_it_once(atlas):
     with ThreadPoolExecutor(8) as pool:
         assert list(pool.map(lambda _: q.run(), range(32))) == [["hit"]] * 32
     assert len(calls) == 1
+
+
+# ---------------------------------------------------------------- review fixes
+def test_unknown_attributes_fail_fast_without_running_a_search(atlas):
+    q = atlas.collection("photos", embed=Text("title")).search("x")
+    with pytest.raises(AttributeError, match="limt"):
+        q.limt  # noqa: B018 - a typo
+    assert not hasattr(q, "shape") and not hasattr(q, "keys")  # library probes
+    assert atlas.vo.calls == []
+    q.to_context()  # a real results attribute does run it
+    assert len(atlas.vo.calls) == 1
+
+
+def test_copies_share_the_engine_but_not_cached_results(atlas):
+    import copy
+
+    q = atlas.collection("photos", embed=Text("title")).search("x").limit(2)
+    q.run()
+    for c in (copy.copy(q), copy.deepcopy(q)):
+        assert c.collection is q.collection and c.k == 2 and c._cache == [] and c._lock is not q._lock
+
+
+def test_metered_client_copies_without_recursing():
+    import copy
+
+    from cinematlas.usage import MeteredVoyage
+
+    vo = MeteredVoyage(FakeVoyage())
+    assert copy.copy(vo).client is vo.client
+
+
+def test_atlas_videos_inherit_the_atlas_models_and_reject_a_second_connection(atlas):
+    custom = Atlas(mongo_client=FakeMongoClient(), voyage_client=FakeVoyage(), model="voyage-multimodal-3",
+                   rerank_model=None)
+    talks = custom.videos("talks", ping=False)
+    assert (talks.model, talks.rerank_model) == ("voyage-multimodal-3", None)
+    assert custom.videos("talks", ping=False, voyage_model="voyage-multimodal-3.5").model == "voyage-multimodal-3.5"
+    with pytest.raises(ValueError, match="atlas owns the connection"):
+        custom.videos("talks", ping=False, mongo_uri="mongodb://elsewhere")
+
+
+def test_weights_must_name_real_sources(fake_mongo, fake_voyage):
+    eng = Cinematlas(mongo_client=fake_mongo, voyage_client=fake_voyage, ping=False)
+    assert dict(eng.search("q").weights(scene=2, rerank=1).fusion_weights) == {"scene": 2, "rerank": 1}
+    with pytest.raises(ValueError, match="visul"):
+        eng.search("q").weights(visul=2)
+
+
+def test_with_retries_needs_at_least_one_attempt():
+    with pytest.raises(ValueError, match="retries"):
+        with_retries(lambda: None, expect=1, retries=0)
+
+
+def test_duplicate_filter_values_collapse():
+    from cinematlas._utils import build_match
+
+    assert build_match((), {"genre": ["a", "a"]}) == {"metadata.genre": "a"}

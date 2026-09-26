@@ -146,3 +146,14 @@ def test_ensure_indexes_uses_the_engine_filters(filtered, fake_mongo):
     defs = fake_mongo.collection.search_indexes
     assert {"type": "filter", "path": "metadata.lang"} in defs["cinematlas_vector_index"]["fields"]
     assert "metadata" in defs["cinematlas_text_index"]["mappings"]["fields"]
+
+
+def test_removing_a_declared_filter_is_reported_as_drift():
+    from cinematlas.indexes import definition_drift, text_index_definition, visual_index_definition
+
+    both, one = ("genre", "year"), ("genre",)
+    assert definition_drift(visual_index_definition(filters=both), visual_index_definition(filters=one)) == (
+        "metadata.year: filter no longer declared",)
+    assert definition_drift(text_index_definition(filters=both), text_index_definition(filters=one)) == (
+        "mappings.fields.metadata.fields.year: filter no longer declared",)
+    assert definition_drift(visual_index_definition(filters=one), visual_index_definition(filters=one)) == ()

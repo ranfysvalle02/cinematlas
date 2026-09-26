@@ -13,8 +13,8 @@ focused modules, each with one reason to change:
     doctor.py        what's wrong and how to fix it
 
 Private ``_methods`` below are the seams between them. They stay on the facade on purpose: the ingest
-pipeline and search call steps through it, so any one step can be replaced (or stubbed in tests)
-without touching the rest.
+pipeline and the search sources call steps through them (``_embed_multimodal_query``, ``_vector_search``,
+``_rerank``, …), so any one step can be replaced (or stubbed in tests) without touching the rest.
 """
 
 from __future__ import annotations
@@ -31,7 +31,7 @@ from . import ingest as _ingest
 from . import media
 from . import search as _search
 from ._utils import extract_video_id, redact_url
-from .capabilities import ROUTING_CALIBRATION, routing_calibration
+from .capabilities import routing_calibration
 from .core.collection import Atlas
 from .doctor import Diagnosis, run_doctor
 from .embed import Embedder
@@ -60,7 +60,7 @@ logger.addHandler(logging.NullHandler())
 DEFAULT_VOYAGE_MODEL = "voyage-multimodal-3.5"
 DEFAULT_MAX_SCENE_SECONDS = 30.0
 DEFAULT_RERANK_MODEL = "rerank-2.5"
-ROUTING_THRESHOLDS = ROUTING_CALIBRATION["rerank-2.5"]  # backwards-compatible alias
+_INHERIT: Any = object()  # sentinel: "take this setting from the atlas"
 
 
 def _resolve_mongo_uri(mongo_uri: str | None) -> str | None:
@@ -79,7 +79,7 @@ class Cinematlas:
         mongo_uri: str | None = None,
         db_name: str = "cinematlas_enterprise",
         collection_name: str = "multimodal_scenes",
-        voyage_model: str = DEFAULT_VOYAGE_MODEL,
+        voyage_model: str | None = None,  # default: the atlas's model, else DEFAULT_VOYAGE_MODEL
         s3_bucket_name: str | None = None,
         voyage_api_key: str | None = None,
         openai_api_key: str | None = None,
@@ -91,7 +91,7 @@ class Cinematlas:
         max_download_mb: int | None = DEFAULT_MAX_DOWNLOAD_MB,
         max_scene_seconds: float | None = DEFAULT_MAX_SCENE_SECONDS,
         scene_embeddings: bool = True,
-        rerank_model: str | None = DEFAULT_RERANK_MODEL,
+        rerank_model: str | None = _INHERIT,  # default: the atlas's, else DEFAULT_RERANK_MODEL; None = off
         routing_thresholds: tuple[float, float] | None = None,
         query_cache_size: int = 256,
         native_fusion: bool | None = None,
@@ -120,6 +120,15 @@ class Cinematlas:
         self.max_download_mb = max_download_mb
         self.max_scene_seconds = max_scene_seconds
         self.scene_embeddings = scene_embeddings
+        if atlas is not None:
+            connection = {"mongo_uri": mongo_uri, "mongo_client": mongo_client, "voyage_client": voyage_client,
+                          "voyage_api_key": voyage_api_key}
+            given = {k for k, v in connection.items() if v is not None}
+            if given:
+                raise ValueError(f"{sorted(given)} can't be combined with atlas=: the atlas owns the connection")
+        voyage_model = voyage_model or (atlas.model if atlas is not None else DEFAULT_VOYAGE_MODEL)
+        if rerank_model is _INHERIT:
+            rerank_model = atlas.rerank_model if atlas is not None else DEFAULT_RERANK_MODEL
         self.rerank_model = rerank_model
         self.routing_thresholds = routing_thresholds
         # None = auto-detect: try the Atlas-native stage once, remember if the cluster rejects it.
@@ -134,8 +143,9 @@ class Cinematlas:
         )
 
         # One Atlas per connection: `atlas.videos(...)` and `atlas.collection(...)` share its Mongo client,
-        # Voyage client and usage. A standalone engine makes its own (and closes it on close()).
-        self._owns_atlas = atlas is None
+        # Voyage client, models and usage. A standalone engine makes its own Atlas, and closes the Mongo
+        # client on close() only if it created that client.
+        self._owns_client = atlas is None and mongo_client is None
         if atlas is None:
             if mongo_client is None:
                 uri = _resolve_mongo_uri(mongo_uri)
@@ -223,7 +233,7 @@ class Cinematlas:
         return f"<Cinematlas {self.db_name}.{self.collection_name} · transcripts={mode} · rerank={rerank}>"
 
     def close(self) -> None:
-        if self._owns_atlas:  # a video collection from atlas.videos() leaves the shared connection open
+        if self._owns_client:  # injected clients and atlas.videos() collections leave the connection open
             self.mongo_client.close()
 
     def __enter__(self) -> Cinematlas:

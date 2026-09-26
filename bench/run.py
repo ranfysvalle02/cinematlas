@@ -169,16 +169,13 @@ def main() -> None:
               f"moment={s_row['moment@1']} p50={row['p50_ms']:.0f}ms")
 
     ablation = {}
-    for name, method in [("visual only (keyframes)", "search_visual_vector"),
-                         ("joint vector only (image+speech)", "search_scene_vector"),
-                         ("transcript + rerank", None), ("adaptive routing", "search")]:
+    arms = {"visual only (keyframes)": {"only": "visual"},
+            "joint vector only (image+speech)": {"only": "scene"},
+            "transcript + rerank": {"sources": ("transcript",), "routing": "fixed"},
+            "adaptive routing": {"routing": "adaptive"}}
+    for name, arm in arms.items():
         for label, eng in [("captions", auto), ("no captions", nocap)]:
-            if method is None:
-                fn = lambda q, e=eng: ask(e, q, top_k=K, sources=("transcript",), routing="fixed")  # noqa: E731
-            else:
-                fn = lambda q, e=eng, m=method: getattr(e, m)(q, top_k=K)  # noqa: E731
-                if method == "search":
-                    fn = lambda q, e=eng: ask(e, q, top_k=K, routing="adaptive")  # noqa: E731
+            fn = lambda q, e=eng, a=arm: ask(e, q, top_k=K, **a)  # noqa: E731
             ablation[name, label] = both(name, fn, speech, visual, t_speech)
             r = ablation[name, label]
             print(f"[{label:11s}] {name:36s} speech={r['speech']['hit@1']:.2f} visual={r['visual']['hit@1']:.2f}")
