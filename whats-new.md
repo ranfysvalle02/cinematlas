@@ -20,7 +20,7 @@ README's unit-test timing is updated, and GitHub releases now exist for 0.15.0 t
   (`ingest`, then `search`) works on a new collection. Verified live: `0:56 "Sonic booms can be about as
   loud as a balloon popping."`
 - Docs: `REVIEW.md` rescored for v0.16. The README architecture map covers the new modules, and the
-  benchmark's generated advice uses `.adaptive()`. This file is new.
+  benchmark's generated advice uses `.adaptive()`. `whats-new.md` is new.
 - Everything from 0.15.0–0.16.1 reaches PyPI for the first time in this release.
 
 ## 0.16.1 · 2026-09-26 07:58 · *GitHub only*
