@@ -58,7 +58,8 @@ boundaries, statistically indistinguishable; fixed-size chunks score 0.82–0.85
 
 Both come with paired significance tests and fourteen predictions written down before each run, four of
 which failed. [TL;DR](https://github.com/ranfysvalle02/cinematlas/blob/main/TLDR.md) · [Paper](https://github.com/ranfysvalle02/cinematlas/blob/main/paper.md) · [every table](https://github.com/ranfysvalle02/cinematlas/blob/main/bench/RESULTS.md) · [the story](https://github.com/ranfysvalle02/cinematlas/blob/main/blog.md) ·
-[review](https://github.com/ranfysvalle02/cinematlas/blob/main/REVIEW.md)
+[review](https://github.com/ranfysvalle02/cinematlas/blob/main/REVIEW.md) ·
+[what's new](https://github.com/ranfysvalle02/cinematlas/blob/main/whats-new.md)
 
 **In the library:** video `search()` ranks scenes with the joint vector and uses a reranker only to pick
 the exact second (`.adaptive()` leans ahead on speech questions, at twice the latency).
@@ -107,8 +108,8 @@ Plain `pip install cinematlas` is search-only (pymongo + voyageai), so it can se
 backend. Ingesting video needs `cinematlas[video]` (OpenCV, PySceneDetect, yt-dlp), and speech-to-text
 needs `whisper` (or an `OPENAI_API_KEY`).
 
-Results are plain dicts underneath (`json.dumps` works). Cinematlas doesn't pick an LLM for you;
-`results.to_context()` gives you numbered, citable excerpts to pass to one.
+Cinematlas doesn't pick an LLM for you; `results.to_context()` gives you numbered, citable excerpts to
+pass to one.
 
 Every Voyage call is metered. `result.usage` is what one ingest sent (per model: calls, inputs,
 tokens, image pixels), `engine.usage` is the running total, and `engine.usage.cost(prices)` turns it
@@ -225,7 +226,8 @@ The joint vector wins on your data: joint 0.93 vs merged 0.62 Hit@1 on 80 questi
 ```
 
 The default challenger is Reciprocal Rank Fusion (what Atlas `$rankFusion` does); `fusion="sum"` tests
-against the strongest merge we found.
+against the strongest merge we found. To see the merged ranking for a single question, use
+`photos.search(q).merged("sum")`.
 
 **Extend it.** A part is anything that turns a record into text or images for the vector; a loader is
 anything that yields records:
@@ -272,7 +274,7 @@ uv run python examples/photos.py "a rover's tracks on red sand" --center JPL
 | [`search.py`](https://github.com/ranfysvalle02/cinematlas/blob/main/examples/search.py) | The scene and the second for any question, with why each hit ranked. `--adaptive` shows routing reading a question as said or shown |
 | [`ask.py`](https://github.com/ranfysvalle02/cinematlas/blob/main/examples/ask.py) | A cited answer from a local LLM ([Ollama](https://ollama.com), no API key), each citation a link to the exact second |
 | [`index_and_search.py`](https://github.com/ranfysvalle02/cinematlas/blob/main/examples/index_and_search.py) | Index any URL, YouTube link or file with live progress, then search it |
-| [`api.py`](https://github.com/ranfysvalle02/cinematlas/blob/main/examples/api.py) | A FastAPI service: `POST /videos` to upload, `GET /search` for deep links |
+| [`api.py`](https://github.com/ranfysvalle02/cinematlas/blob/main/examples/api.py) | A FastAPI service: `POST /videos` to upload, an async `GET /search` for deep links |
 | [`photos.py`](https://github.com/ranfysvalle02/cinematlas/blob/main/examples/photos.py) | `cinematlas.core` on about 200 NASA photos: search by text or by picture, filter by center |
 
 ---
@@ -306,8 +308,9 @@ uv run python examples/photos.py "a rover's tracks on red sand" --center JPL
 | One source | `.only("transcript")` · `.only("text")` · `.only("visual")` · `.only("scene")` |
 
 Each one chains with `.video(...)`, `.where(...)`, `.limit(k)` and `.rerank(False)`. Each call returns
-a new query, so a base query can be shared and refined safely. Every hit carries `moment` (`{start, end, text}`), `moment_link`
-(YouTube `?t=431s`, files `#t=431`), `ranks`, `relevance` and the scene's fields.
+a new query, so a base query can be shared and refined safely. Every hit carries `moment`
+(`{start, end, text}`), `moment_link` (YouTube `?t=431s`, files `#t=431`), `ranks`, `relevance` and the
+scene's fields.
 
 `ingest()` accepts:
 
@@ -357,6 +360,10 @@ cinematlas/
   embed.py         keyframe, joint, transcript and query vectors
   ingest.py        the pipeline and its gapless replace
   search.py        single sources, fusion, reranking, routing
+  query.py         the lazy query builder shared by video and records (Search, RecordSearch)
+  results.py       Hit / Hits: plain dicts with typed accessors
+  usage.py         Voyage usage metering, cost estimates, the one retry path
+  tracing.py       optional OpenTelemetry spans
   capabilities.py  native-stage fallbacks and routing calibration
   doctor.py        what's wrong and how to fix it
   demo/            cinematlas demo: FastAPI server + a one-file web page

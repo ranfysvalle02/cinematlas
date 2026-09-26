@@ -81,4 +81,5 @@ afternoon instead of taking it on trust.
 [blog](https://github.com/ranfysvalle02/cinematlas/blob/main/blog.md) (the story) ·
 [paper](https://github.com/ranfysvalle02/cinematlas/blob/main/paper.md) (methods and limits) ·
 [RESULTS](https://github.com/ranfysvalle02/cinematlas/blob/main/bench/RESULTS.md) (every table) ·
-[REVIEW](https://github.com/ranfysvalle02/cinematlas/blob/main/REVIEW.md) (an honest score)
+[REVIEW](https://github.com/ranfysvalle02/cinematlas/blob/main/REVIEW.md) (an honest score) ·
+[what's new](https://github.com/ranfysvalle02/cinematlas/blob/main/whats-new.md) (every release)

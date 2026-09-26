@@ -69,7 +69,7 @@ Without captions, keyframes alone lose speech questions (0.53 → 0.40): pixels 
 
 **Decision rule, fixed before this corpus was run:** scene-first becomes the default if it is not significantly worse than adaptive routing on either corpus and it is faster. On this corpus it is not significantly worse (14 vs 11, p = 0.690) and faster (213 vs 484 ms).
 
-**Where scene-first and routing differ.** They tie overall, but not per category: scene-first is better on questions about what was shown, routing leans ahead on what was said. Finding the exact second is not a difference: on the questions where both found the right scene, scene-first picked the right second 6/9 times and routing 6/9 here (16/22 and 17/22 on the first corpus). The Moment@1 columns above differ only because each method is scored on its own correct answers. If your users mostly ask about speech, pass `routing="adaptive"`.
+**Where scene-first and routing differ.** They tie overall, but not per category: scene-first is better on questions about what was shown, routing leans ahead on what was said. Finding the exact second is not a difference: on the questions where both found the right scene, scene-first picked the right second 6/9 times and routing 6/9 here (16/22 and 17/22 on the first corpus). The Moment@1 columns above differ only because each method is scored on its own correct answers. If your users mostly ask about speech, use `.adaptive()` (`engine.search(q).adaptive()`).
 
 | Corpus | Questions | Scene-first | Routing | Scene-first only | Routing only | p |
 | --- | --- | --- | --- | --- | --- | --- |

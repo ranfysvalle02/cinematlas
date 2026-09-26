@@ -67,6 +67,10 @@ class RecordingQuery:
         return SearchResults([HIT])
 
 
+def ingest_call(eng):
+    return next(c for c in eng.calls if c[0] == "ingest")
+
+
 @pytest.fixture
 def run(monkeypatch, capsys):
     RecordingEngine.instances.clear()
@@ -114,12 +118,13 @@ def test_ingest_prints_result_json_on_stdout_and_progress_on_stderr(run):
     assert code == 0
     assert json.loads(out)["scenes"] == 4 and json.loads(out)["video_id"] == "v1"
     assert "✓ detected scenes  (count=4)" in err and "Indexed 4 scenes" in err
-    assert eng.calls[0][:2] == ("ingest", "www.b.com/v.mp4")  # engine resolves URL vs file
+    assert eng.calls[0] == ("ensure_indexes", {})  # a fresh cluster gets its indexes before the first ingest
+    assert eng.calls[1][:2] == ("ingest", "www.b.com/v.mp4")  # engine resolves URL vs file
 
 
 def test_quiet_suppresses_progress(run):
     _, out, err, eng = run("ingest", "https://b.com/v.mp4", "-q")
-    assert err == "" and eng.calls[0][2]["progress"] is None
+    assert err == "" and ingest_call(eng)[2]["progress"] is None
     assert json.loads(out)["scenes"] == 4
 
 
@@ -127,7 +132,7 @@ def test_dash_streams_stdin_as_upload(run, monkeypatch):
     stdin = SimpleNamespace(buffer=io.BytesIO(b"video-bytes"))
     monkeypatch.setattr(sys, "stdin", stdin)
     _, _, _, eng = run("ingest", "-", "-q")
-    assert eng.calls[0][1] is stdin.buffer and eng.calls[0][2]["filename"] == "stdin.mp4"
+    assert ingest_call(eng)[1] is stdin.buffer and ingest_call(eng)[2]["filename"] == "stdin.mp4"
 
 
 def test_domain_errors_exit_1_with_message_not_traceback(run):
@@ -198,7 +203,7 @@ def test_progress_is_a_tqdm_bar_on_a_terminal_and_lines_otherwise():
 
 def test_meta_and_where_reach_ingest_and_search_and_declare_filters(run):
     _, _, _, eng = run("--filter", "series", "ingest", "v.mp4", "--meta", "course=cs101", "--meta", "term=fall", "-q")
-    assert eng.calls[0][2]["metadata"] == {"course": "cs101", "term": "fall"}
+    assert ingest_call(eng)[2]["metadata"] == {"course": "cs101", "term": "fall"}
     assert eng.kwargs["filters"] == ("series",)
     _, _, _, eng = run("search", "exam", "--where", "course=cs101", "--where", "term=fall,spring", "--format", "json")
     assert ("where", ("course", "cs101"), ("term", ["fall", "spring"])) in eng.calls[0][2]

@@ -1,6 +1,6 @@
 # Up next
 
-What to build next, checked against the code as of 0.16.0. A lot of the outside wishlist was already
+What to build next, checked against the code as of 0.16.2. Release history: [whats-new.md](https://github.com/ranfysvalle02/cinematlas/blob/main/whats-new.md). A lot of the outside wishlist was already
 built, so this file starts by saying what exists. That keeps us from building it twice.
 
 ## Already shipped (no work needed)
@@ -20,7 +20,7 @@ built, so this file starts by saying what exists. That keeps us from building it
 | Progress output | CLI `_progress_printer` |
 | Checking your setup | `cinematlas doctor` |
 
-## Phase 1: done in 0.14.0
+## Phase 1: done (shipped in 0.15.0)
 
 - Voyage usage metering: `MeteredVoyage` wraps the client, `engine.usage` / `atlas.usage` keep running
   totals, `IngestResult.usage` shows what one ingest used, and `Usage.cost(prices)` estimates dollars

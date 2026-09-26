@@ -327,7 +327,8 @@ def held_out(eng: Cinematlas, first: list[dict], first_corpus: tuple) -> list[st
         "a difference: on the questions where both found the right scene, scene-first picked the right second "
         f"{m_sf}/{m_both} times and routing {m_ad}/{m_both} here ({f_sf_m}/{f_both} and {f_ad_m}/{f_both} on the "
         "first corpus). The Moment@1 columns above differ only because each method is scored on its own "
-        "correct answers. If your users mostly ask about speech, pass `routing=\"adaptive\"`.",
+        "correct answers. If your users mostly ask about speech, use `.adaptive()` "
+        "(`engine.search(q).adaptive()`).",
         "",
         "| Corpus | Questions | Scene-first | Routing | Scene-first only | Routing only | p |",
         "| --- | --- | --- | --- | --- | --- | --- |",

@@ -1,6 +1,6 @@
 # Cinematlas: project review
 
-*A candid assessment of the project as of v0.11: the research, the software, and what's left.*
+*A candid assessment of the project as of v0.16: the research, the software, and what's left. The research sections are unchanged since v0.11; the software rows reflect the v0.15–0.16 API redesign ([what's new](https://github.com/ranfysvalle02/cinematlas/blob/main/whats-new.md)).*
 
 ---
 
@@ -32,7 +32,9 @@ ideal). The rule that survives: **fuse within a unit, chunk across units.**
 **The product.** `pip install cinematlas`: video search whose default ranks with the joint vector, plus
 `cinematlas.core`, which applies both halves of the rule to any records (`Text + Image`, `chunk=`,
 loaders for slides, screenshots and PDFs) and ships `evaluate()`, so users can check the finding on
-their own data instead of taking it on trust.
+their own data instead of taking it on trust. Both share one connection (`Atlas`), one Voyage usage
+meter and one lazy, awaitable query builder (`.search(q).where(...).limit(k)`). The plain install is
+search-only, and video ingest is the `[video]` extra.
 
 ---
 
@@ -42,12 +44,12 @@ their own data instead of taking it on trust.
 | --- | --- | --- |
 | **Research rigor** | **9.5** | Paired significance tests, not averages. Held-out data with questions written blind. Fourteen predictions recorded before the runs that tested them, four of which failed and are reported; the newest are committed to git before their runs. A tuning set kept separate from the test set. An oracle ceiling. |
 | **Insight** | **8.5** | Early vs late fusion is a known axis in multimodal learning; the contribution is a practical, falsifiable rule for retrieval, a measured boundary (length, not misalignment), and a working fix (chunk-level fusion). The explanation of *why* rank fusion fails (it needs lists to agree) is clean and testable. |
-| **Software engineering** | **8.5** | 310 unit tests, media tests on real ffmpeg/Whisper, live integration tests on Atlas cloud and Atlas Local. The engine was split into focused modules with no API change. Graceful fallbacks everywhere. Deductions: integration tests don't run in CI, and the facade is 540 lines (mostly docstrings for the public API). |
-| **Developer experience** | **9.5** | `cinematlas demo`: a local web app where you add a video, ask a question and the player jumps to the second. Four commands from install to a deep link. `doctor` prints the exact fix. Every README output is real. Five examples, each run live. `evaluate()` turns the claim into something users can verify. |
+| **Software engineering** | **9** | 391 unit tests, 7 media tests on real ffmpeg/Whisper, 18 live integration tests on Atlas cloud and Atlas Local. The v0.15 API redesign was checked with a paired run against v0.13: 120/120 identical rankings. One retry path, one connection owner, and one query builder shared by video and records. Graceful fallbacks everywhere. Deductions: integration tests don't run in CI, and the live tier has shown rare timing flakes while Atlas syncs indexes. |
+| **Developer experience** | **9.5** | `cinematlas demo`: a local web app where you add a video, ask a question and the player jumps to the second. Four commands from install to a deep link. `doctor` prints the exact fix. One chainable query for every search (`.where`, `.video`, `.only`, `.adaptive`, `await`). Voyage usage and cost on every ingest. A quickstart notebook. Every README output is real. Five examples, each run live. `evaluate()` turns the claim into something users can verify. |
 | **Documentation & storytelling** | **9** | Three documents with distinct jobs: README (use it), blog (the story, including where we were wrong), paper (methods, predictions, limits). Every number traces to a generated `RESULTS.md`. |
 | **Reproducibility** | **8.5** | Every table regenerates from `bench/`; corpora, questions and distractors are committed. It still needs an Atlas cluster, a Voyage key and hours of embedding. |
 | **External validity** | **8** | Four corpora in three domains: video, space photography and museum art (0.95 vs 0.62). The result survives terse from-memory queries (0.80 vs 0.70 vs the strongest merge) and messy typing (0.84 vs 0.61). Still no real users, and the long-record tests pad real descriptions rather than using real long documents. |
-| **Production readiness** | **8** | Safe URL handling, idempotent setup, gapless re-ingest, per-record failure isolation. Sources don't hinge on yt-dlp: `s3://` and `gs://` go through the cloud SDKs, direct and presigned links stream with every redirect SSRF-checked. Deductions: one embedding provider, a young `core` API, and chunk-level fusion re-embeds the image with every chunk, which multiplies embedding cost. |
+| **Production readiness** | **8** | Safe URL handling, idempotent setup, gapless re-ingest, per-record failure isolation. Sources don't hinge on yt-dlp: `s3://` and `gs://` go through the cloud SDKs, direct and presigned links stream with every redirect SSRF-checked. Metadata filters are built into every index, so filtering happens before ranking. Async servers can await queries, OpenTelemetry spans cover ingest stages and searches, and the search-only install leaves out OpenCV. Deductions: one embedding provider (deliberately), an API that is new as of v0.15, and chunk-level fusion re-embeds the image with every chunk, which multiplies embedding cost. |
 | **Overall** | **9** | The core claim now survives every objection we could test without real users. |
 
 ---
@@ -93,6 +95,6 @@ their own data instead of taking it on trust.
 | Benchmark questions | 380 (plus 80 noise-degraded), 320 written blind by AI agents |
 | Pre-stated predictions | 14 (10 held, 4 failed) |
 | Late-fusion methods beaten | 5 (RRF, CombSUM, CombMNZ, CombMAX, cross-validated weights) |
-| Tests | 310 unit + media + 18 live integration (Atlas cloud and Atlas Local) |
-| Source modules | 9 engine modules + `cinematlas.core` (8 modules) |
-| Public docs | README, blog, paper, `bench/RESULTS.md`, this review |
+| Tests | 391 unit + 7 media + 18 live integration (Atlas cloud and Atlas Local) |
+| Source modules | 19 top-level modules + `cinematlas.core` (8 modules) |
+| Public docs | README, TLDR, blog, paper, `bench/RESULTS.md`, this review, [what's new](https://github.com/ranfysvalle02/cinematlas/blob/main/whats-new.md) |

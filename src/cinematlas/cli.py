@@ -148,6 +148,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                                   "indexes": {s.name: s.state for s in engine.inspect_indexes()}}))
 
             elif args.command == "ingest":
+                engine.ensure_indexes()  # idempotent; so `ingest` then `search` works on a fresh cluster
                 progress = None if args.quiet else _progress_printer(sys.stderr)
                 if not args.quiet:
                     print(f"Ingesting {args.source} …", file=sys.stderr)
