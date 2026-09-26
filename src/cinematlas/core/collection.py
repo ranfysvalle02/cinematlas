@@ -7,7 +7,7 @@
                               moment="description", filters=["center"], key="nasa_id")
     photos.setup()                                    # the joint vector index; idempotent
     photos.add(records)                               # any iterable of dicts, or a Loader
-    photos.search("astronaut repairing a telescope", where={"center": "GSFC"}).top
+    photos.search("astronaut repairing a telescope").where(center="GSFC").top
 
 Every record's parts are embedded together into one vector. Search ranks by that vector; when a
 ``moment`` field is set, a reranker picks each hit's best sentence without changing the order.
@@ -31,6 +31,8 @@ from pymongo.operations import SearchIndexModel
 
 from ..exceptions import CinematlasError, DependencyError, SearchError
 from ..indexes import definition_drift, wait_until_queryable
+from ..query import RecordSearch
+from ..usage import metered, with_retries
 from .evaluate import EvalReport, mcnemar, normalize_questions, score
 from .fusion import MERGES
 from .loaders import Loader
@@ -97,7 +99,8 @@ class Atlas:
             except ImportError as e:  # pragma: no cover - core dependency
                 raise DependencyError("voyageai is required: pip install voyageai") from e
             voyage_client = voyageai.Client(api_key=voyage_api_key or os.getenv("VOYAGE_API_KEY"))
-        self.vo = voyage_client
+        self.vo = metered(voyage_client)
+        self.usage = self.vo.usage  # Voyage calls, tokens, pixels; .cost(prices) estimates USD
 
     def collection(
         self,
@@ -127,6 +130,20 @@ class Atlas:
         db, _, coll = name.rpartition(".")
         return Collection(self, self.client[db or self.db][coll], as_joint(embed), moment=moment, key=key,
                           filters=tuple(filters), display=tuple(display), late=late)
+
+    def videos(self, name: str = "multimodal_scenes", **options: Any) -> Any:
+        """A video collection on this cluster, sharing this connection, Voyage client and ``usage``::
+
+            talks = atlas.videos("media.talks", filters=("course",))
+            talks.ingest("lecture.mov", metadata={"course": "cs101"})
+            talks.search("when is the exam?").where(course="cs101").top.link
+
+        ``name`` is ``"collection"`` or ``"db.collection"``; ``options`` go to :class:`cinematlas.Cinematlas`.
+        """
+        from ..engine import Cinematlas
+
+        db, _, coll = name.rpartition(".")
+        return Cinematlas(atlas=self, db_name=db or self.db, collection_name=coll, **options)
 
     def close(self) -> None:
         if self._owns_client:
@@ -266,20 +283,9 @@ class Collection:
         return str(get_field(record, self.key) if self.key else next(iter(record.values()), "?"))[:80]
 
     def _embed(self, inputs: list[list[EmbedInput]], input_type: str, retries: int) -> tuple[list | None, str | None]:
-        error = None
-        for attempt in range(1, retries + 1):
-            try:
-                response = self.atlas.vo.multimodal_embed(inputs=inputs, model=self.atlas.model, input_type=input_type)
-                if len(response.embeddings) != len(inputs):
-                    got = len(response.embeddings)
-                    raise CinematlasError(f"Voyage returned {got} vectors for {len(inputs)} inputs")
-                return list(response.embeddings), None
-            except Exception as e:  # rate limits and transient network errors: back off and retry
-                error = f"{type(e).__name__}: {e}"
-                logger.warning(f"Voyage embedding failed (attempt {attempt}/{retries}): {e}")
-                if attempt < retries:
-                    time.sleep(1.5**attempt)
-        return None, error
+        return with_retries(
+            lambda: self.atlas.vo.multimodal_embed(inputs=inputs, model=self.atlas.model, input_type=input_type),
+            expect=len(inputs), retries=retries)
 
     def _document(self, record: Mapping[str, Any], vector: Sequence[float],
                   part_vectors: Mapping[int, Sequence[float]] | None = None) -> dict[str, Any]:
@@ -329,14 +335,20 @@ class Collection:
         return self.mongo.count_documents(dict(where or {}))
 
     # ------------------------------------------------------------------ reading
-    def search(self, query: str | Part | Joint | Sequence[str | Part], k: int = 5, *,
-               where: Mapping[str, Any] | None = None, moment: bool = True,
-               candidates: int | None = None) -> Hits:
-        """The ``k`` records whose joint vector best matches ``query``.
+    def search(self, query: str | Part | Joint | Sequence[str | Part]) -> RecordSearch:
+        """The records whose joint vector best matches ``query``, as a lazy query::
+
+            photos.search("astronaut repairing a telescope").where(center="GSFC").limit(3).top
 
         ``query`` can be text, ``Image("photo.jpg")``, or a mix: ``["red shoes", Image("q.jpg")]``.
-        ``where`` filters on the collection's ``filters`` fields, e.g. ``{"brand": "Nike"}``.
+        ``.where(...)`` filters on the collection's ``filters`` fields (any MQL value, e.g.
+        ``year={"$gte": 2000}``), ``.rerank(False)`` skips picking each hit's moment, and
+        ``.merged("sum")`` ranks each part separately and merges, for comparison (needs ``late=True``).
         """
+        return RecordSearch(self, query)
+
+    def _search(self, query: Any, k: int = 5, *, where: Mapping[str, Any] | None = None, moment: bool = True,
+                candidates: int | None = None) -> Hits:
         if not isinstance(k, int) or k < 1:
             raise ValueError(f"k must be a positive integer, got {k!r}")
         inputs = _query_inputs(query)
@@ -387,19 +399,13 @@ class Collection:
         except PyMongoError as e:
             raise SearchError(f"Vector search failed on {self.index_name!r}: {e}. Did you run .setup()?") from e
 
-    def search_merged(self, query: str | Part | Joint | Sequence[str | Part], k: int = 5, *,
-                      where: Mapping[str, Any] | None = None, depth: int = 50, fusion: str = "rrf") -> Hits:
-        """The usual design, for comparison: search each part's own vector, then merge the rankings.
-
-        ``fusion`` is ``"rrf"`` (Reciprocal Rank Fusion, what Atlas ``$rankFusion`` does), ``"sum"``
-        (normalized scores added; the strongest in bench/), ``"mnz"`` or ``"max"``; see
-        :mod:`cinematlas.core.fusion`. Needs ``late=True``. Each hit's ``ranks`` shows its position in
-        every part's list.
-        """
+    def _search_merged(self, query: Any, k: int = 5, *, where: Mapping[str, Any] | None = None, depth: int = 50,
+                       fusion: str = "rrf") -> Hits:
+        """Each part's own vector searched, then the rankings merged (``fusion``: rrf, sum, mnz, max)."""
         if fusion not in MERGES:
             raise ValueError(f"fusion must be one of {sorted(MERGES)}, got {fusion!r}")
         if not self.late:
-            raise CinematlasError("search_merged needs per-part vectors: create the collection with late=True.")
+            raise CinematlasError(".merged() needs per-part vectors: create the collection with late=True.")
         inputs = _query_inputs(query)
         if not inputs:
             return Hits(display=self.display)
@@ -432,8 +438,8 @@ class Collection:
         ident = (lambda h: h.get("_key")) if self.key else (lambda h: h.get("_id"))
         joint, merged, rows = [], [], []
         for query, relevant in items:
-            j = [ident(h) for h in self.search(query, k, where=where, moment=False)]
-            m = [ident(h) for h in self.search_merged(query, k, where=where, fusion=fusion)]
+            j = [ident(h) for h in self._search(query, k, where=where, moment=False)]
+            m = [ident(h) for h in self._search_merged(query, k, where=where, fusion=fusion)]
             joint.append(j)
             merged.append(m)
             rows.append({"q": query if isinstance(query, str) else repr(query), "relevant": sorted(map(str, relevant)),

@@ -61,7 +61,7 @@ def test_local_file_is_ingested_without_download(engine, fake_mongo, video_with_
         return [{"start": 0.0, "end": 4.5, "text": "tone"}]
 
     monkeypatch.setattr(engine, "_transcribe_audio_safe", fake_stt)
-    assert engine.ingest_video(str(video_with_audio), video_id="local") == 3
+    assert engine.ingest(str(video_with_audio), video_id="local").scenes == 3
     assert heard["streams"][0]["codec_name"] == "mp3"  # the real extracted track reached STT
     assert {d["deep_link"] for d in fake_mongo.collection.docs} == {None}  # no URL to deep-link into
 

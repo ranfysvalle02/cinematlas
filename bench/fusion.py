@@ -63,10 +63,10 @@ def video_items(db: str, collection: str, speech_file: str, visual_file: str):
     labels = json.loads((HERE / speech_file).read_text()) + json.loads((HERE / visual_file).read_text())
     for label in labels:
         q, key = label["q"], (lambda h: (h["video_id"], h["scene_id"]))
-        found = {"keyframe": eng.search_visual_vector(q, top_k=DEPTH),
-                 "transcript": eng.search_transcript(q, top_k=DEPTH),
-                 "full text": eng.search_text(q, top_k=DEPTH)}
-        joint_hits = eng.search_scene_vector(q, top_k=DEPTH)
+        found = {"keyframe": eng.search(q).only("visual").limit(DEPTH).run(),
+                 "transcript": eng.search(q).only("transcript").limit(DEPTH).run(),
+                 "full text": eng.search(q).only("text").limit(DEPTH).run()}
+        joint_hits = eng.search(q).only("scene").limit(DEPTH).run()
         docs = {key(h): h for hits in [*found.values(), joint_hits] for h in hits}
         rel = {k for k, h in docs.items() if relevant(h, label)}
         # A labelled scene that no list returned still counts as relevant (it's a miss for everyone).

@@ -58,7 +58,8 @@ with Atlas() as atlas:
         photos.wait_until_searchable()
 
     query = Image(args.like) if args.like else " ".join(args.question) or "astronaut fixing a telescope in space"
-    hits = photos.search(query, k=args.k, where={"center": args.center} if args.center else None)
+    hits = photos.search(query).limit(args.k)
+    hits = (hits.where(center=args.center) if args.center else hits).run()
 
 print(f"\n{'Image: ' + args.like if args.like else repr(query)}\n")
 for i, hit in enumerate(hits, 1):

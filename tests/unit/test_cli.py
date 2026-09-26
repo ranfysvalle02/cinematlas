@@ -47,13 +47,24 @@ class RecordingEngine:
             kw["progress"]("scenes", {"count": 4})
         return IngestResult("v1", 4, "url", "client", 2.5, spoken_scenes=3)
 
-    def search(self, q, **kw):
-        self.calls.append(("search", q, kw))
-        return SearchResults([HIT])
+    def search(self, q):
+        return RecordingQuery(self, q)
 
-    def search_visual_vector(self, q, **kw):
-        self.calls.append(("search_visual_vector", q, kw))
-        return SearchResults([{**HIT, "scene_id": 2}, {**HIT, "scene_id": 0}])
+
+class RecordingQuery:
+    """Stands in for cinematlas.query.Search: records the builder chain, runs on .run()."""
+
+    def __init__(self, eng, q, chain=()):
+        self.eng, self.q, self.chain = eng, q, chain
+
+    def __getattr__(self, name):
+        return lambda *a: RecordingQuery(self.eng, self.q, (*self.chain, (name, *a)))
+
+    def run(self):
+        self.eng.calls.append(("search", self.q, self.chain))
+        if ("only", "visual") in self.chain:
+            return SearchResults([{**HIT, "scene_id": 2}, {**HIT, "scene_id": 0}])
+        return SearchResults([HIT])
 
 
 @pytest.fixture
@@ -147,12 +158,12 @@ def test_context_format_is_pipeable_into_any_llm(run):
 def test_search_routes_by_modality(run):
     _, out, _, eng = run("search", "sonic boom", "--by", "visual", "-k", "2", "--video-id", "v", "--format", "json")
     assert [json.loads(line)["scene_id"] for line in out.splitlines()] == [2, 0]
-    assert eng.calls[0] == ("search_visual_vector", "sonic boom", {"top_k": 2, "video_id": "v"})
+    assert eng.calls[0] == ("search", "sonic boom", (("limit", 2), ("video", "v"), ("only", "visual")))
 
 
 def test_search_by_adaptive_opts_into_routing(run):
     _, _, _, eng = run("search", "sonic boom", "--by", "adaptive", "--format", "json")
-    assert eng.calls[0] == ("search", "sonic boom", {"top_k": 5, "video_id": None, "routing": "adaptive"})
+    assert eng.calls[0] == ("search", "sonic boom", (("limit", 5), ("video", ""), ("adaptive",)))
 
 
 def test_console_script_is_installed():

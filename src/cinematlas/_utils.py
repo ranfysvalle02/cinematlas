@@ -5,7 +5,7 @@ import math
 import re
 import time
 import urllib.parse
-from collections.abc import Iterable, Sequence
+from collections.abc import Iterable, Mapping, Sequence
 from typing import Any
 
 _YOUTUBE_HOSTS = {"www.youtube.com", "youtube.com", "m.youtube.com", "music.youtube.com"}
@@ -227,9 +227,13 @@ def build_vector_search_pipeline(
     top_k: int,
     query_text: str | None = None,
     query_vector: list[float] | None = None,
-    video_id: str | None = None,
+    match: Mapping[str, Any] | None = None,
 ) -> list[dict[str, Any]]:
-    """Build a ``$vectorSearch`` + ``$project`` pipeline (text for autoEmbed, vector otherwise)."""
+    """Build a ``$vectorSearch`` + ``$project`` pipeline (text for autoEmbed, vector otherwise).
+
+    ``match`` is a pre-filter on indexed filter fields, e.g. ``{"video_id": "a", "metadata.genre": "x"}``
+    (see :func:`build_match`).
+    """
     if (query_text is None) == (query_vector is None):
         raise ValueError("Provide exactly one of query_text or query_vector.")
     if not isinstance(top_k, int) or top_k < 1:
@@ -245,19 +249,36 @@ def build_vector_search_pipeline(
         stage["query"] = query_text
     else:
         stage["queryVector"] = query_vector
-    if video_id is not None:
-        stage["filter"] = {"video_id": video_id}
+    if match:
+        stage["filter"] = dict(match)
 
     return [{"$vectorSearch": stage}, {"$project": dict(SEARCH_PROJECTION)}]
 
 
-def build_text_search_stage(index_name: str, query_text: str, video_id: str | None = None) -> dict[str, Any]:
+def build_match(video_ids: Sequence[str] = (), where: Mapping[str, str | Sequence[str]] | None = None
+                ) -> dict[str, Any]:
+    """A pre-filter for every source: videos by ID, plus metadata fields (``metadata.<name>``).
+
+    A string matches that value; a list matches any of its values.
+    """
+    match: dict[str, Any] = {}
+    if video_ids:
+        match["video_id"] = video_ids[0] if len(video_ids) == 1 else {"$in": list(video_ids)}
+    for name, value in (where or {}).items():
+        values = [value] if isinstance(value, str) else list(value)
+        match[f"metadata.{name}"] = values[0] if len(values) == 1 else {"$in": values}
+    return match
+
+
+def build_text_search_stage(index_name: str, query_text: str, match: Mapping[str, Any] | None = None
+                            ) -> dict[str, Any]:
     """Atlas Search (BM25) over transcripts: catches exact names/numbers vectors can blur."""
     text = {"text": {"query": query_text, "path": "transcript"}}
-    if video_id is None:
+    if not match:
         return {"$search": {"index": index_name, **text}}
-    return {"$search": {"index": index_name, "compound": {
-        "must": [text], "filter": [{"equals": {"path": "video_id", "value": video_id}}]}}}
+    filters = [{"in": {"path": path, "value": cond["$in"]}} if isinstance(cond, dict)
+               else {"equals": {"path": path, "value": cond}} for path, cond in match.items()]
+    return {"$search": {"index": index_name, "compound": {"must": [text], "filter": filters}}}
 
 
 def build_rank_fusion_pipeline(

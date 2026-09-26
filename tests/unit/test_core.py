@@ -252,7 +252,7 @@ def test_search_ranks_by_the_joint_vector_and_filters(atlas, voyage):
     mongo = Mongo(ROWS)
     coll = Atlas(mongo_client=Client(mongo), voyage_client=voyage).collection(
         "photos", embed=Text("title"), filters=["center"])
-    hits = coll.search("telescope repair", k=2, where={"center": "GSFC"})
+    hits = coll.search("telescope repair").where(center="GSFC").limit(2).run()
     stage = mongo.pipelines[0][0]["$vectorSearch"]
     assert stage["filter"] == {"center": "GSFC"} and stage["limit"] == 2 and stage["path"] == "embedding"
     assert [h["_key"] for h in hits] == ["a", "b"] and [h.rank for h in hits] == [1, 2]
@@ -260,14 +260,14 @@ def test_search_ranks_by_the_joint_vector_and_filters(atlas, voyage):
 
 
 def test_filtering_on_an_undeclared_field_fails_fast(photos):
-    with pytest.raises(ValueError, match="declared filters"):
-        photos.search("x", where={"year": 1990})
+    with pytest.raises(ValueError, match="not a filter field"):
+        photos.search("x").where(year=1990)  # raises while building, before any query runs
 
 
 def test_the_reranker_picks_each_hits_best_sentence_without_reordering(atlas, voyage):
     coll = Atlas(mongo_client=Client(Mongo(ROWS)), voyage_client=voyage).collection(
         "photos", embed=Text("title"), moment="description")
-    hits = coll.search("replace a gyroscope", k=2)
+    hits = coll.search("replace a gyroscope").limit(2)
     assert [h["_key"] for h in hits] == ["a", "b"]  # vector order kept
     assert hits[0].text == "They replace a gyroscope." and hits[0].moment["relevance"] == 1.0
     assert "vector #1" in hits[0].explain() and "relevance" in hits[0].explain()
@@ -286,13 +286,13 @@ def test_image_queries_skip_moments_and_reranker_outages_degrade(atlas, voyage, 
 def test_search_errors_point_at_setup(photos, mongo):
     mongo.aggregate_error = OperationFailure("index not found")
     with pytest.raises(SearchError, match="setup"):
-        photos.search("x")
+        photos.search("x").run()
 
 
 @pytest.mark.parametrize("bad", [0, -1, 2.5])
 def test_invalid_k(photos, bad):
     with pytest.raises(ValueError):
-        photos.search("x", k=bad)
+        photos.search("x").limit(bad)
 
 
 def test_empty_query_returns_nothing_without_calling_voyage(photos, voyage):
@@ -302,7 +302,7 @@ def test_empty_query_returns_nothing_without_calling_voyage(photos, voyage):
 def test_hits_print_and_become_llm_context(atlas, voyage):
     coll = Atlas(mongo_client=Client(Mongo(ROWS)), voyage_client=voyage).collection(
         "photos", embed=Text("title"), moment="description")
-    hits = coll.search("replace a gyroscope", k=2)
+    hits = coll.search("replace a gyroscope").limit(2)
     assert str(hits).splitlines()[0].startswith(" 1. Hubble repair")
     assert hits.to_context().startswith("[1] Hubble repair\nThey replace a gyroscope.")
 
@@ -408,14 +408,14 @@ def test_merged_search_fuses_each_parts_ranking(voyage):
                        "embedding_part1": [{"_key": "y"}, {"_key": "z"}]})
     coll = Atlas(mongo_client=Client(mongo), voyage_client=voyage).collection(
         "photos", embed=Text("title") + Image("image"), key="id", late=True)
-    hits = coll.search_merged("q", k=3)
+    hits = coll.search("q").merged().limit(3)
     assert [h["_key"] for h in hits] == ["y", "x", "z"]  # in both lists beats first in one
     assert hits[0]["ranks"] == {"0:Text('title')": 2, "1:Image('image')": 1}
 
 
 def test_merged_search_needs_late_vectors(photos):
     with pytest.raises(Exception, match="late=True"):
-        photos.search_merged("q")
+        photos.search("q").merged().run()
 
 
 def test_evaluate_scores_both_methods_and_runs_the_paired_test(voyage):
@@ -522,11 +522,11 @@ def test_merged_search_and_evaluate_accept_a_fusion_choice(voyage):
                        "embedding_part1": [{"_key": "y", "score": 0.8}, {"_key": "x", "score": 0.7}]})
     coll = Atlas(mongo_client=Client(mongo), voyage_client=voyage).collection(
         "photos", embed=Text("title") + Image("image"), key="id", late=True)
-    top = coll.search_merged("q", k=2, fusion="sum")[0]
+    top = coll.search("q").merged("sum").limit(2)[0]
     assert top["_key"] == "x" and "merged #1" in top.explain() and "0:Text('title') #1" in top.explain()
     assert coll.evaluate([{"q": "q", "relevant": "x"}], fusion="max").merged.hit1 == 1.0
     with pytest.raises(ValueError, match="fusion must be one of"):
-        coll.search_merged("q", fusion="magic")
+        coll.search("q").merged("magic")
 
 
 # ------------------------------------------------------------------ chunk= : fuse within a chunk, chunk across a record
@@ -613,7 +613,7 @@ def test_chunked_search_returns_each_records_best_chunk_once(voyage):
             {"_key": "b#1", "_parent": "b", "_chunk": 1, "body": "other", "score": 0.7}]
     coll = Atlas(mongo_client=Client(Mongo(rows)), voyage_client=voyage).collection(
         "docs", embed=Text("body", chunk=500), key="id", moment="body")
-    hits = coll.search("the answer", k=2)
+    hits = coll.search("the answer").limit(2)
     assert [(h["_key"], h["chunk"]) for h in hits] == [("a", 2), ("b", 1)]
     assert hits[0].text == "the answer"  # the matching chunk is the moment
 

@@ -21,7 +21,8 @@ args = p.parse_args()
 question = " ".join(args.question)
 
 with engine() as eng:
-    results = eng.search(question, top_k=args.k, routing="adaptive" if args.adaptive else None)
+    results = eng.search(question).limit(args.k)
+    results = (results.adaptive() if args.adaptive else results).run()
 
 if not results:
     raise SystemExit("No matches. Is anything indexed? Try examples/index_and_search.py first.")

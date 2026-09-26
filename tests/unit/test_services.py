@@ -97,26 +97,28 @@ def test_no_s3_configured_is_a_noop(engine):
 
 # ------------------------------------------------------------- search
 def test_visual_search_embeds_query_as_query_type(engine, fake_voyage, fake_mongo):
-    engine.search_visual_vector("a red car", top_k=2, video_id="v")
+    engine.search("a red car").only("visual").limit(2).video("v").run()
     assert fake_voyage.calls[-1]["input_type"] == "query"
     stage = fake_mongo.collection.pipelines[-1][0]["$vectorSearch"]
     assert stage["path"] == "visual_embedding" and stage["filter"] == {"video_id": "v"}
 
 
-@pytest.mark.parametrize("method", ["search_visual_vector", "search_auto_embedded_transcript"])
-def test_empty_query_short_circuits(engine, fake_voyage, fake_mongo, method):
-    assert getattr(engine, method)("") == []
+@pytest.mark.parametrize("source", ["visual", "transcript"])
+def test_empty_query_short_circuits(engine, fake_voyage, fake_mongo, source):
+    engine._resolved_transcript_mode = "autoembed"
+    assert engine.search("").only(source) == []
     assert fake_voyage.calls == [] and fake_mongo.collection.pipelines == []
 
 
-@pytest.mark.parametrize("method", ["search_visual_vector", "search_auto_embedded_transcript"])
-def test_database_errors_surface_as_search_error(engine, fake_mongo, method):
+@pytest.mark.parametrize("source", ["visual", "transcript"])
+def test_database_errors_surface_as_search_error(engine, fake_mongo, source):
+    engine._resolved_transcript_mode = "autoembed"
     fake_mongo.collection.aggregate_error = OperationFailure("index not found")
     with pytest.raises(SearchError, match="index not found"):
-        getattr(engine, method)("q")
+        engine.search("q").only(source).run()
 
 
 def test_voyage_errors_surface_as_search_error(engine, fake_voyage):
     fake_voyage.failures = 1
     with pytest.raises(SearchError, match="vectorization"):
-        engine.search_visual_vector("q")
+        engine.search("q").only("visual").run()

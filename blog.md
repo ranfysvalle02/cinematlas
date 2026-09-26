@@ -234,7 +234,7 @@ on your data, `evaluate()` will tell you, and we want to know.
 ---
 
 ```bash
-pip install "cinematlas[whisper]"
+pip install "cinematlas[video,whisper]"
 cinematlas ingest "https://www.youtube.com/watch?v=5NhYvbMdbBU"
 cinematlas search "how loud is a sonic boom?"   # → 0:56 "about as loud as a balloon popping"
 ```

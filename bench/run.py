@@ -25,6 +25,20 @@ from cinematlas import Cinematlas  # noqa: E402
 
 HERE = Path(__file__).parent
 K = 10
+
+
+def ask(eng, q, top_k=K, *, only=None, sources=None, weights=None, routing=None, rerank=True):
+    """One search configuration as a keyword call, so the arms below read like a table."""
+    s = eng.search(q).limit(top_k).rerank(rerank)
+    if only:
+        s = s.only(only)
+    if sources:
+        s = s.using(*sources)
+    if weights is not None:
+        s = s.weights(**weights)
+    if routing:
+        s = s.routing(routing)
+    return s.run()
 load_dotenv(HERE.parent / ".env")
 
 
@@ -49,7 +63,7 @@ def wait_for_sync(eng: Cinematlas, timeout_s: float = 600) -> None:
     spoken = eng.collection.count_documents({"transcript": {"$nin": ["", None]}, "status": "COMPLETED"})
     deadline = time.monotonic() + timeout_s
     while True:
-        seen = len(eng.search_transcript("the", top_k=min(spoken, 500)))
+        seen = len(ask(eng, only="transcript", q="the", top_k=min(spoken, 500)))
         if seen >= spoken or time.monotonic() > deadline:
             print(f"index sync: {seen}/{spoken} spoken scenes searchable")
             return
@@ -128,22 +142,23 @@ def main() -> None:
     equal = {"visual": 1, "scene": 1, "transcript": 1, "text": 1, "rerank": 1}
     tuned = {"visual": 0.25, "scene": 1, "transcript": 1, "text": 1, "rerank": 2}
     configs = {
-        "visual only (keyframes)": lambda q: auto.search_visual_vector(q, top_k=K),
-        "joint vector only (image+speech)": lambda q: auto.search_scene_vector(q, top_k=K),
-        "full-text only (Atlas Search BM25)": lambda q: auto.search_text(q, top_k=K),
-        "transcript only · autoEmbed voyage-4": lambda q: auto.search_transcript(q, top_k=K),
-        "transcript only · client voyage-4": lambda q: client.search_transcript(q, top_k=K),
-        "transcript only · client, voyage-4-lite queries": lambda q: client_lite.search_transcript(q, top_k=K),
-        "transcript + rerank": lambda q: auto.search(q, top_k=K, sources=("transcript",), routing="fixed"),
-        "fixed fusion, equal weights, no rerank": lambda q: auto.search(
+        "visual only (keyframes)": lambda q: ask(auto, only="visual", q=q, top_k=K),
+        "joint vector only (image+speech)": lambda q: ask(auto, only="scene", q=q, top_k=K),
+        "full-text only (Atlas Search BM25)": lambda q: ask(auto, only="text", q=q, top_k=K),
+        "transcript only · autoEmbed voyage-4": lambda q: ask(auto, only="transcript", q=q, top_k=K),
+        "transcript only · client voyage-4": lambda q: ask(client, only="transcript", q=q, top_k=K),
+        "transcript only · client, voyage-4-lite queries": lambda q: ask(
+            client_lite, only="transcript", q=q, top_k=K),
+        "transcript + rerank": lambda q: ask(auto, q, top_k=K, sources=("transcript",), routing="fixed"),
+        "fixed fusion, equal weights, no rerank": lambda q: ask(auto,
             q, top_k=K, rerank=False, weights=equal, routing="fixed"),
-        "fixed fusion, equal weights + rerank": lambda q: auto.search(q, top_k=K, weights=equal, routing="fixed"),
-        "fixed fusion, tuned weights + rerank": lambda q: auto.search(q, top_k=K, weights=tuned, routing="fixed"),
-        "adaptive routing · autoEmbed": lambda q: auto.search(q, top_k=K, routing="adaptive"),
-        "**scene-first (default)**: joint vector ranks, reranker picks the second": lambda q: auto.search(
+        "fixed fusion, equal weights + rerank": lambda q: ask(auto, q, top_k=K, weights=equal, routing="fixed"),
+        "fixed fusion, tuned weights + rerank": lambda q: ask(auto, q, top_k=K, weights=tuned, routing="fixed"),
+        "adaptive routing · autoEmbed": lambda q: ask(auto, q, top_k=K, routing="adaptive"),
+        "**scene-first (default)**: joint vector ranks, reranker picks the second": lambda q: ask(auto,
             q, top_k=K, routing="scene"),
-        "adaptive · client-side fusion": lambda q: client_side_fusion.search(q, top_k=K, routing="adaptive"),
-        "adaptive · client transcript mode": lambda q: client.search(q, top_k=K, routing="adaptive"),
+        "adaptive · client-side fusion": lambda q: ask(client_side_fusion, q, top_k=K, routing="adaptive"),
+        "adaptive · client transcript mode": lambda q: ask(client, q, top_k=K, routing="adaptive"),
     }
     rows = []
     for name, fn in configs.items():
@@ -159,11 +174,11 @@ def main() -> None:
                          ("transcript + rerank", None), ("adaptive routing", "search")]:
         for label, eng in [("captions", auto), ("no captions", nocap)]:
             if method is None:
-                fn = lambda q, e=eng: e.search(q, top_k=K, sources=("transcript",), routing="fixed")  # noqa: E731
+                fn = lambda q, e=eng: ask(e, q, top_k=K, sources=("transcript",), routing="fixed")  # noqa: E731
             else:
                 fn = lambda q, e=eng, m=method: getattr(e, m)(q, top_k=K)  # noqa: E731
                 if method == "search":
-                    fn = lambda q, e=eng: e.search(q, top_k=K, routing="adaptive")  # noqa: E731
+                    fn = lambda q, e=eng: ask(e, q, top_k=K, routing="adaptive")  # noqa: E731
             ablation[name, label] = both(name, fn, speech, visual, t_speech)
             r = ablation[name, label]
             print(f"[{label:11s}] {name:36s} speech={r['speech']['hit@1']:.2f} visual={r['visual']['hit@1']:.2f}")
@@ -217,13 +232,13 @@ def main() -> None:
 
 
 HELD_OUT = {
-    "keyframes only": lambda e, q: e.search_visual_vector(q, top_k=K),
-    "transcript + rerank": lambda e, q: e.search(q, top_k=K, sources=("transcript",), routing="fixed"),
-    "rank fusion, tuned weights + rerank": lambda e, q: e.search(
+    "keyframes only": lambda e, q: ask(e, only="visual", q=q, top_k=K),
+    "transcript + rerank": lambda e, q: ask(e, q, top_k=K, sources=("transcript",), routing="fixed"),
+    "rank fusion, tuned weights + rerank": lambda e, q: ask(e,
         q, top_k=K, weights={"visual": 0.25, "scene": 1, "transcript": 1, "text": 1, "rerank": 2}, routing="fixed"),
-    "joint vector only": lambda e, q: e.search_scene_vector(q, top_k=K),
-    "adaptive routing": lambda e, q: e.search(q, top_k=K, routing="adaptive"),
-    "scene-first": lambda e, q: e.search(q, top_k=K, routing="scene"),
+    "joint vector only": lambda e, q: ask(e, only="scene", q=q, top_k=K),
+    "adaptive routing": lambda e, q: ask(e, q, top_k=K, routing="adaptive"),
+    "scene-first": lambda e, q: ask(e, q, top_k=K, routing="scene"),
 }
 
 
@@ -241,8 +256,8 @@ def matched_moments(eng: Cinematlas, labels: list[dict], times: list[float | Non
 
     both = sf = ad = 0
     for label, t in zip(labels, times, strict=True):
-        s = eng.search(label["q"], top_k=K, routing="scene")[:1]
-        a = eng.search(label["q"], top_k=K, routing="adaptive")[:1]
+        s = ask(eng, label["q"], top_k=K, routing="scene")[:1]
+        a = ask(eng, label["q"], top_k=K, routing="adaptive")[:1]
         if s and a and relevant(s[0], label) and relevant(a[0], label):
             both, sf, ad = both + 1, sf + ok(s[0], label, t), ad + ok(a[0], label, t)
     return both, sf, ad
@@ -254,7 +269,7 @@ def held_out(eng: Cinematlas, first: list[dict], first_corpus: tuple) -> list[st
     visual = json.loads((HERE / "queries_station_visual.json").read_text())
     t_speech = [answer_time(eng, lab) for lab in speech]
     for lab in speech + visual:  # warm the query cache so latency compares retrieval, not Voyage round trips
-        eng.search_scene_vector(lab["q"], top_k=1)
+        ask(eng, only="scene", q=lab["q"], top_k=1)
     rows = {name: both(name, lambda q, f=fn: f(eng, q), speech, visual, t_speech) for name, fn in HELD_OUT.items()}
     for name, r in rows.items():
         print(f"[held-out] {name:36s} speech={r['speech']['hit@1']:.2f} visual={r['visual']['hit@1']:.2f} "

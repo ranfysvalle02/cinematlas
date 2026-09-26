@@ -18,6 +18,7 @@ from .indexes import (
 )
 from .results import IngestResult, SearchHit, SearchResults
 from .retrieval import to_context
+from .usage import MeteredVoyage, Usage
 
 try:
     __version__ = version("cinematlas")
@@ -34,9 +35,11 @@ __all__ = [
     "IngestResult",
     "IngestionError",
     "IngestionStatus",
+    "MeteredVoyage",
     "SearchError",
     "SearchHit",
     "SearchResults",
+    "Usage",
     "auto_embed_index_definition",
     "build_deep_link",
     "desired_indexes",

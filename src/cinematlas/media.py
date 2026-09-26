@@ -16,7 +16,7 @@ from typing import IO, Any, Union
 
 from PIL import Image
 
-from .exceptions import IngestionError
+from .exceptions import DependencyError, IngestionError
 
 logger = logging.getLogger("cinematlas")
 
@@ -30,6 +30,20 @@ YTDLP_FORMAT = (
 )
 
 VideoFile = Union[str, "os.PathLike[str]", bytes, bytearray, memoryview, IO[bytes], Any]
+
+
+_PACKAGES = {"cv2": "opencv-python-headless", "yt_dlp": "yt-dlp"}
+
+
+def require(module: str) -> Any:
+    """Import a video dependency, or say which extra installs it (plain ``cinematlas`` is search-only)."""
+    import importlib
+
+    try:
+        return importlib.import_module(module)
+    except ImportError as e:
+        package = _PACKAGES.get(module.split(".")[0], module)
+        raise DependencyError(f'Ingesting video needs {package}: pip install "cinematlas[video]"') from e
 
 
 def upload_keyframe(s3_client: Any, bucket: str | None, pil_image: Image.Image, s3_key: str) -> str:
@@ -84,7 +98,7 @@ def materialize_file(file: VideoFile, temp_dir: str, filename: str | None) -> tu
                 digest.update(chunk)
                 out.write(chunk)
         else:
-            raise TypeError(f"Unsupported file type for ingest_file: {type(file).__name__}")
+            raise TypeError(f"Unsupported file type for ingest: {type(file).__name__}")
 
     if os.path.getsize(dst) == 0:
         raise IngestionError("Uploaded file is empty.")
@@ -104,7 +118,7 @@ def unwrap_upload(file: Any, filename: str | None) -> tuple[Any, str | None]:
 
 
 def assert_decodable(video_path: str) -> None:
-    import cv2
+    cv2 = require("cv2")
 
     cap = cv2.VideoCapture(video_path)
     try:
@@ -118,7 +132,7 @@ def assert_decodable(video_path: str) -> None:
 def download_video(video_url: str, temp_dir: str, max_attempts: int = 3,
                    max_download_mb: int | None = DEFAULT_MAX_DOWNLOAD_MB) -> str:
     """Download with yt-dlp, retrying transient failures (YouTube intermittently answers 403)."""
-    import yt_dlp
+    yt_dlp = require("yt_dlp")
 
     ydl_opts = {
         "format": YTDLP_FORMAT,
@@ -176,9 +190,10 @@ def extract_audio(video_path: str, temp_dir: str) -> str | None:
 
 def detect_scene_spans(video_path: str, scene_threshold: float) -> list[tuple[float, float]]:
     """Return ``(start_sec, end_sec)`` per detected scene; whole video as one scene if no cuts."""
-    import cv2
-    from scenedetect import SceneManager, open_video
-    from scenedetect.detectors import ContentDetector
+    cv2 = require("cv2")
+    scenedetect = require("scenedetect")
+    ContentDetector = require("scenedetect.detectors").ContentDetector
+    SceneManager, open_video = scenedetect.SceneManager, scenedetect.open_video
 
     video = open_video(video_path)
     scene_manager = SceneManager()
@@ -205,7 +220,7 @@ def detect_scene_spans(video_path: str, scene_threshold: float) -> list[tuple[fl
 def extract_keyframes(video_path: str, spans: Sequence[tuple[float, float]], vid: str,
                       upload: Callable[[Image.Image, str], str]) -> list[dict[str, Any]]:
     """Grab the middle frame of each span as a PIL image; ``upload`` returns its thumbnail URL (or "")."""
-    import cv2
+    cv2 = require("cv2")
 
     cap = cv2.VideoCapture(video_path)
     scenes: list[dict[str, Any]] = []

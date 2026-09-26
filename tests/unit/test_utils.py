@@ -124,7 +124,7 @@ class TestVectorSearchPipeline:
 
     def test_vector_query_with_video_filter(self):
         (stage, _) = build_vector_search_pipeline(
-            index_name="ix", path="visual_embedding", top_k=1, query_vector=[0.1], video_id="v1"
+            index_name="ix", path="visual_embedding", top_k=1, query_vector=[0.1], match={"video_id": "v1"}
         )
         assert stage["$vectorSearch"]["queryVector"] == [0.1]
         assert stage["$vectorSearch"]["filter"] == {"video_id": "v1"}

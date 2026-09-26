@@ -110,7 +110,15 @@ class IngestResult:
     seconds: float
     spoken_scenes: int = 0
     stages: dict[str, float] = field(default_factory=dict)  # seconds per pipeline stage
+    usage: dict[str, dict[str, int]] = field(default_factory=dict)  # Voyage calls/tokens/pixels, per model
 
     def __str__(self) -> str:
         return (f"Indexed {self.scenes} scenes ({self.spoken_scenes} with speech) as {self.video_id!r} "
-                f"in {self.seconds:.1f}s [{self.transcript_mode}]")
+                f"in {self.seconds:.1f}s [{self.transcript_mode}]" + self._usage_note())
+
+    def _usage_note(self) -> str:
+        if not self.usage:
+            return ""
+        calls = sum(m["calls"] for m in self.usage.values())
+        tokens = sum(m["total_tokens"] for m in self.usage.values())
+        return f", {calls} Voyage calls, {tokens:,} tokens"

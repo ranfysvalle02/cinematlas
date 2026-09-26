@@ -149,7 +149,7 @@ def evaluate_chunkers(atlas: Atlas) -> dict:
         hits, ref = [], []
         for q in qs:
             rel = set(q["relevant"])
-            hits.append(top1([h["_key"] for h in coll.search(q["q"], k=5, moment=False)], rel))
+            hits.append(top1([h["_key"] for h in coll.search(q["q"]).limit(5).rerank(False)], rel))
             ref.append(top1(best_chunk(ideal, ideal._query_vector(_query_inputs(q["q"])), DEPTH), rel))
         by_kind = {k: sum(h for h, q in zip(hits, qs, strict=True) if q["kind"] == k) / 40 for k in ("visual", "text")}
         out[name] = {"length": length, "hit1": sum(hits) / len(hits), "by_kind": by_kind,

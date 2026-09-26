@@ -50,7 +50,7 @@ def _build_parser() -> argparse.ArgumentParser:
 
     se = sub.add_parser("search", help="Search what was shown and said")
     se.add_argument("query")
-    se.add_argument("--by", choices=["hybrid", "adaptive", "transcript", "visual", "text"], default="hybrid",
+    se.add_argument("--by", choices=["hybrid", "adaptive", "scene", "transcript", "visual", "text"], default="hybrid",
                     help="hybrid (default): joint image+speech vector ranks scenes, reranker picks the second; "
                          "adaptive: fuse every source, routed per question (leans ahead on speech questions)")
     se.add_argument("--format", choices=["auto", "table", "json", "context"], default="auto",
@@ -122,12 +122,12 @@ def main(argv: Sequence[str] | None = None) -> int:
                 print(json.dumps(dataclasses.asdict(result)))
 
             elif args.command == "search":
+                query = engine.search(args.query).limit(args.top_k).video(args.video_id or "")
                 if args.by == "adaptive":
-                    hits = engine.search(args.query, top_k=args.top_k, video_id=args.video_id, routing="adaptive")
-                else:
-                    search = getattr(engine, {"hybrid": "search", "transcript": "search_transcript",
-                                              "visual": "search_visual_vector", "text": "search_text"}[args.by])
-                    hits = search(args.query, top_k=args.top_k, video_id=args.video_id)
+                    query = query.adaptive()
+                elif args.by != "hybrid":
+                    query = query.only(args.by)
+                hits = query.run()
                 fmt = args.format
                 if fmt == "auto":
                     fmt = "table" if sys.stdout.isatty() else "json"

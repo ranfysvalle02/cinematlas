@@ -83,6 +83,8 @@ def test_ingest_url_returns_a_typed_result(served):
     assert (result.video_id, result.scenes, result.spoken_scenes, result.source_type) == ("talk", 3, 1, "url")
     assert set(result.stages) == {"fetched", "scenes", "transcribed", "embedded", "stored"}
     assert str(result).startswith("Indexed 3 scenes (1 with speech) as 'talk'")
+    assert result.usage[served.model]["calls"] >= 1  # this ingest's Voyage calls, per model
+    assert "Voyage calls" in str(result)
 
 
 @pytest.mark.parametrize("kind", ["path", "bytes", "fileobj"])
@@ -107,10 +109,6 @@ def test_engine_level_default_progress_and_broken_callbacks_are_harmless(served)
 
     served.progress = explode
     assert served.ingest(URL).scenes == 3
-
-
-def test_legacy_methods_still_return_counts(served):
-    assert served.ingest_video(URL) == 3
 
 
 # ---------------------------------------------------------------- graceful native fallbacks

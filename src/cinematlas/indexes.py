@@ -11,7 +11,7 @@ Transcript search has two interchangeable backends:
 
 import logging
 import time
-from collections.abc import Iterable
+from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
 from typing import Any, Literal
 
@@ -37,6 +37,11 @@ DEFAULT_VISUAL_DIMENSIONS = 1024
 DEFAULT_TEXT_DIMENSIONS = 1024
 
 
+def _filter_fields(filters: Sequence[str]) -> list[dict[str, Any]]:
+    """``video_id`` plus each declared metadata filter (stored under ``metadata.<name>``)."""
+    return [{"type": "filter", "path": "video_id"}, *({"type": "filter", "path": f"metadata.{f}"} for f in filters)]
+
+
 def _vector_field(path: str, num_dimensions: int, quantization: str | None) -> dict[str, Any]:
     field: dict[str, Any] = {"type": "vector", "path": path, "numDimensions": num_dimensions, "similarity": "cosine"}
     if quantization:
@@ -45,42 +50,43 @@ def _vector_field(path: str, num_dimensions: int, quantization: str | None) -> d
 
 
 def visual_index_definition(
-    num_dimensions: int = DEFAULT_VISUAL_DIMENSIONS, quantization: str | None = DEFAULT_QUANTIZATION
+    num_dimensions: int = DEFAULT_VISUAL_DIMENSIONS, quantization: str | None = DEFAULT_QUANTIZATION,
+    filters: Sequence[str] = (),
 ) -> dict[str, Any]:
-    return {"fields": [_vector_field("visual_embedding", num_dimensions, quantization),
-                       {"type": "filter", "path": "video_id"}]}
+    return {"fields": [_vector_field("visual_embedding", num_dimensions, quantization), *_filter_fields(filters)]}
 
 
 def scene_index_definition(
-    num_dimensions: int = DEFAULT_VISUAL_DIMENSIONS, quantization: str | None = DEFAULT_QUANTIZATION
+    num_dimensions: int = DEFAULT_VISUAL_DIMENSIONS, quantization: str | None = DEFAULT_QUANTIZATION,
+    filters: Sequence[str] = (),
 ) -> dict[str, Any]:
     """Joint keyframe+transcript vectors (voyage-multimodal-3.5 interleaved input)."""
-    return {"fields": [_vector_field("scene_embedding", num_dimensions, quantization),
-                       {"type": "filter", "path": "video_id"}]}
+    return {"fields": [_vector_field("scene_embedding", num_dimensions, quantization), *_filter_fields(filters)]}
 
 
-def text_index_definition() -> dict[str, Any]:
-    """Atlas Search (full-text, BM25) index over transcripts, filterable by video."""
-    return {"mappings": {"dynamic": False, "fields": {
+def text_index_definition(filters: Sequence[str] = ()) -> dict[str, Any]:
+    """Atlas Search (full-text, BM25) index over transcripts, filterable by video and metadata."""
+    fields: dict[str, Any] = {
         "transcript": {"type": "string", "analyzer": "lucene.english"},
         "video_id": {"type": "token"},
-    }}}
-
-
-def auto_embed_index_definition(model: str = DEFAULT_TEXT_MODEL) -> dict[str, Any]:
-    return {
-        "fields": [
-            {"type": "autoEmbed", "modality": "text", "path": "transcript", "model": model},
-            {"type": "filter", "path": "video_id"},
-        ]
     }
+    if filters:
+        fields["metadata"] = {"type": "document", "dynamic": False,
+                              "fields": {f: {"type": "token"} for f in filters}}
+    return {"mappings": {"dynamic": False, "fields": fields}}
+
+
+def auto_embed_index_definition(model: str = DEFAULT_TEXT_MODEL, filters: Sequence[str] = ()) -> dict[str, Any]:
+    return {"fields": [{"type": "autoEmbed", "modality": "text", "path": "transcript", "model": model},
+                       *_filter_fields(filters)]}
 
 
 def transcript_vector_index_definition(
-    num_dimensions: int = DEFAULT_TEXT_DIMENSIONS, quantization: str | None = DEFAULT_QUANTIZATION
+    num_dimensions: int = DEFAULT_TEXT_DIMENSIONS, quantization: str | None = DEFAULT_QUANTIZATION,
+    filters: Sequence[str] = (),
 ) -> dict[str, Any]:
     return {"fields": [_vector_field("transcript_embedding", num_dimensions, quantization),
-                       {"type": "filter", "path": "video_id"}]}
+                       *_filter_fields(filters)]}
 
 
 def detect_transcript_mode(
@@ -122,21 +128,23 @@ def desired_indexes(
     scene: bool = True,
     text: bool = True,
     names: dict[str, str] | None = None,
+    filters: Sequence[str] = (),
 ) -> dict[str, tuple[str, dict[str, Any]]]:
     """The single source of truth: ``{index_name: (kind, definition)}`` for a transcript mode."""
     n = {"visual": DEFAULT_VISUAL_INDEX, "scene": DEFAULT_SCENE_INDEX, "text": DEFAULT_TEXT_INDEX,
          "auto": DEFAULT_AUTO_INDEX, "transcript": DEFAULT_TRANSCRIPT_INDEX, **(names or {})}
     wanted: dict[str, tuple[str, dict[str, Any]]] = {
-        n["visual"]: ("vectorSearch", visual_index_definition(num_dimensions, quantization)),
+        n["visual"]: ("vectorSearch", visual_index_definition(num_dimensions, quantization, filters)),
     }
     if scene:
-        wanted[n["scene"]] = ("vectorSearch", scene_index_definition(num_dimensions, quantization))
+        wanted[n["scene"]] = ("vectorSearch", scene_index_definition(num_dimensions, quantization, filters))
     if text:
-        wanted[n["text"]] = ("search", text_index_definition())
+        wanted[n["text"]] = ("search", text_index_definition(filters))
     if mode == "autoembed":
-        wanted[n["auto"]] = ("vectorSearch", auto_embed_index_definition(text_model))
+        wanted[n["auto"]] = ("vectorSearch", auto_embed_index_definition(text_model, filters))
     else:
-        wanted[n["transcript"]] = ("vectorSearch", transcript_vector_index_definition(text_dimensions, quantization))
+        wanted[n["transcript"]] = ("vectorSearch",
+                                   transcript_vector_index_definition(text_dimensions, quantization, filters))
     return wanted
 
 
@@ -164,10 +172,20 @@ def definition_drift(current: dict[str, Any] | None, desired: dict[str, Any]) ->
             if have is None:
                 diffs.append(f"mappings.fields.{field}: missing")
                 continue
-            for key, value in spec.items():  # server-added options (norms, store, …) are ignored
-                if have.get(key) != value:
-                    diffs.append(f"mappings.fields.{field}.{key}: {have.get(key)!r} -> {value!r}")
+            diffs.extend(_mapping_drift(f"mappings.fields.{field}", have, spec))
     return tuple(diffs)
+
+
+def _mapping_drift(where: str, have: dict[str, Any], want: dict[str, Any]) -> list[str]:
+    """Keys Cinematlas sets must match, recursively; server-added options (norms, store, …) are ignored."""
+    diffs = []
+    for key, value in want.items():
+        got = have.get(key)
+        if isinstance(value, dict) and isinstance(got, dict):
+            diffs.extend(_mapping_drift(f"{where}.{key}", got, value))
+        elif got != value:
+            diffs.append(f"{where}.{key}: {got!r} -> {value!r}")
+    return diffs
 
 
 def inspect_indexes(
@@ -202,6 +220,7 @@ def ensure_search_indexes(
     text_model: str | None = None,
     auto_embed_model: str | None = None,
     text_dimensions: int = DEFAULT_TEXT_DIMENSIONS,
+    filters: Sequence[str] = (),
     update: bool = False,
     wait: bool = True,
     timeout_s: float = 600,
@@ -234,7 +253,7 @@ def ensure_search_indexes(
     def wanted_for(m: TranscriptMode) -> dict[str, tuple[str, dict[str, Any]]]:
         return desired_indexes(m, text_model=model, quantization=quantization, num_dimensions=num_dimensions,
                                text_dimensions=text_dimensions, scene=bool(scene_index_name),
-                               text=bool(text_index_name), names=names)
+                               text=bool(text_index_name), names=names, filters=filters)
 
     wanted = wanted_for(mode)
     existing = {ix["name"] for ix in collection.list_search_indexes()}

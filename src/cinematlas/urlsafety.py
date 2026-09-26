@@ -35,7 +35,7 @@ def validate_remote_url(source: str, *, allow_private: bool = False) -> str:
         raise IngestionError(f"No such file: {source!r}")  # "clip.mp4" is a missing file, not a host
     if parsed.scheme not in ("http", "https"):
         raise IngestionError(f"Unsupported URL scheme {parsed.scheme!r}; use http(s), s3://, gs:// "
-                             "or ingest_file()")
+                             "or ingest() a local file")
     if not parsed.hostname:
         raise IngestionError(f"URL has no host: {source!r}")
     if not allow_private:

@@ -47,7 +47,7 @@ including against every smarter merge we could build.
 ## Quickstart
 
 ```bash
-pip install "cinematlas[whisper]"
+pip install "cinematlas[video,whisper]"
 export MONGODB_URI="mongodb+srv://…"  VOYAGE_API_KEY="pa-…"
 cinematlas ingest "https://www.youtube.com/watch?v=5NhYvbMdbBU"
 cinematlas search "how loud is a sonic boom?"     # → 0:56 "about as loud as a balloon popping"

@@ -50,7 +50,7 @@ def ingest(cls: type[Cinematlas], uri: str, mode: str, coll: str, db: str = DB,
         print(f"[{coll}] indexes ->", eng.ensure_indexes(timeout_s=900))
         for vid, nasa_id in episodes.items():
             t = time.time()
-            n = eng.ingest_video(url(nasa_id), video_id=vid)
+            n = eng.ingest(url(nasa_id), video_id=vid).scenes
             print(f"[{coll}] {vid}: {n} scenes in {time.time() - t:.0f}s")
 
 

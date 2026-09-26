@@ -29,13 +29,33 @@ class StubEngine:
         progress("scenes", {"count": 4})
         return IngestResult(video_id="file_1", scenes=4, source_type="file", transcript_mode="autoembed", seconds=2.0)
 
-    def search(self, q, top_k=5, video_id=None, routing=None):
+    def search(self, q):
+        return StubQuery(self, q)
+
+    def _run(self, q, top_k, video_id, routing):
         self.searches.append((q, top_k, video_id, routing))
         hit = SearchHit({"video_id": "yt1", "video_url": "https://www.youtube.com/watch?v=abc123",
                          "timestamp_start": 50.0, "timestamp_end": 60.0, "rank": 1, "ranks": {"scene": 1},
                          "moment": {"start": 56.0, "end": 58.0, "text": "about as loud as a balloon popping"},
                          "moment_link": "https://www.youtube.com/watch?v=abc123&t=56s", "score": 0.02})
         return SearchResults([hit])
+
+
+class StubQuery:
+    def __init__(self, eng, q, k=5, video=None, routing=None):
+        self.eng, self.q, self.k, self.vid, self.mode = eng, q, k, video, routing
+
+    def limit(self, k):
+        return StubQuery(self.eng, self.q, k, self.vid, self.mode)
+
+    def video(self, vid):
+        return StubQuery(self.eng, self.q, self.k, vid or None, self.mode)
+
+    def adaptive(self):
+        return StubQuery(self.eng, self.q, self.k, self.vid, "adaptive")
+
+    def run(self):
+        return self.eng._run(self.q, self.k, self.vid, self.mode)
 
 
 @pytest.fixture

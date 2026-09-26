@@ -68,13 +68,13 @@ def downloads(engine, monkeypatch):
 
 def test_schemeless_url_is_fetched_over_https(engine, downloads):
     with pytest.raises(IngestionError, match="stop after fetch"):
-        engine.ingest_video("www.b.com/v.mp4")
+        engine.ingest("www.b.com/v.mp4")
     assert downloads == ["https://www.b.com/v.mp4"]
 
 
 def test_signed_url_is_used_to_fetch_but_never_persisted(engine, fake_mongo, downloads):
     with pytest.raises(IngestionError):
-        engine.ingest_video(PRESIGNED)
+        engine.ingest(PRESIGNED)
     assert downloads == [PRESIGNED]
     (tomb,) = fake_mongo.collection.docs
     assert "Signature" not in tomb["video_url"] and "Credential" not in tomb["video_url"]
@@ -83,9 +83,9 @@ def test_signed_url_is_used_to_fetch_but_never_persisted(engine, fake_mongo, dow
 def test_signed_url_video_id_is_stable_across_fresh_signatures(engine, fake_mongo, downloads):
     # A re-signed URL for the same object must map to the same video (so re-ingest replaces).
     with pytest.raises(IngestionError):
-        engine.ingest_video(PRESIGNED)
+        engine.ingest(PRESIGNED)
     with pytest.raises(IngestionError):
-        engine.ingest_video(PRESIGNED.replace("deadbeef", "cafef00d"))
+        engine.ingest(PRESIGNED.replace("deadbeef", "cafef00d"))
     ids = {d["video_id"] for d in fake_mongo.collection.docs}
     assert len(ids) == 1
 
@@ -103,7 +103,7 @@ def test_signed_url_video_id_is_stable_across_fresh_signatures(engine, fake_mong
 def test_ssrf_guard_refuses_non_public_addresses(engine, downloads, monkeypatch, host, ip):
     monkeypatch.setattr("cinematlas.urlsafety.socket.getaddrinfo", fake_resolver({host: ip}))
     with pytest.raises(IngestionError, match="non-public address"):
-        engine.ingest_video(f"https://{host}/v.mp4")
+        engine.ingest(f"https://{host}/v.mp4")
     assert downloads == [], "must refuse before any request is made"
 
 
@@ -111,21 +111,21 @@ def test_private_urls_can_be_explicitly_allowed(engine, downloads, monkeypatch):
     monkeypatch.setattr("cinematlas.urlsafety.socket.getaddrinfo", fake_resolver({"nas.lan": "192.168.1.5"}))
     engine.allow_private_urls = True
     with pytest.raises(IngestionError, match="stop after fetch"):
-        engine.ingest_video("http://nas.lan/media/v.mp4")
+        engine.ingest("http://nas.lan/media/v.mp4")
     assert downloads == ["http://nas.lan/media/v.mp4"]
 
 
 @pytest.mark.parametrize("url", ["file:///etc/passwd", "ftp://b.com/v.mp4", "gopher://b.com/x"])
 def test_only_http_schemes_are_fetched(engine, downloads, url):
     with pytest.raises(IngestionError, match="scheme"):
-        engine.ingest_video(url)
+        engine.ingest(url)
     assert downloads == []
 
 
 @pytest.mark.parametrize("src", ["clip.mp4", "missing_video.mov", "not a url"])
 def test_missing_local_file_is_not_mistaken_for_a_host(engine, downloads, src):
     with pytest.raises(IngestionError, match="No such file"):
-        engine.ingest_video(src)
+        engine.ingest(src)
     assert downloads == []
 
 
@@ -137,7 +137,7 @@ def test_unresolvable_host_is_a_clear_error(engine, downloads, monkeypatch):
 
     monkeypatch.setattr("cinematlas.urlsafety.socket.getaddrinfo", fail)
     with pytest.raises(IngestionError, match="Cannot resolve"):
-        engine.ingest_video("https://no-such-host.example/v.mp4")
+        engine.ingest("https://no-such-host.example/v.mp4")
 
 
 def test_download_size_cap_is_passed_to_ytdlp(engine, monkeypatch, tmp_path):

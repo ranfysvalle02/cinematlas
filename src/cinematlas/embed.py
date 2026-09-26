@@ -4,14 +4,14 @@ from __future__ import annotations
 
 import gc
 import logging
-import time
 from collections.abc import Sequence
 from typing import Any
 
 from bson.binary import Binary, BinaryVectorDtype
 
 from ._cache import LRUCache
-from .exceptions import CinematlasError, SearchError
+from .exceptions import SearchError
+from .usage import with_retries
 
 logger = logging.getLogger("cinematlas")
 
@@ -42,36 +42,20 @@ class Embedder:
         todo = [i for i, t in enumerate(transcripts) if t.strip()]
         for b in range(0, len(todo), batch_size):
             idx = todo[b : b + batch_size]
-            for attempt in range(1, max_retries + 1):
-                try:
-                    res = self.vo.embed([transcripts[i] for i in idx], model=self.text_model, input_type="document")
-                    if len(res.embeddings) != len(idx):
-                        raise CinematlasError(f"Voyage returned {len(res.embeddings)} embeddings for {len(idx)} inputs")
-                    for i, vec in zip(idx, res.embeddings, strict=True):
-                        out[i] = vec
-                    break
-                except Exception as e:
-                    logger.warning(f"Voyage transcript embedding failed (Attempt {attempt}/{max_retries}): {e}")
-                    if attempt < max_retries:
-                        time.sleep(1.5**attempt)
+            texts = [transcripts[i] for i in idx]
+            vecs, _ = with_retries(lambda t=texts: self.vo.embed(t, model=self.text_model, input_type="document"),
+                                   expect=len(idx), retries=max_retries, what="Voyage transcript embedding")
+            for i, vec in zip(idx, vecs or [None] * len(idx), strict=True):
+                out[i] = vec
         return out
 
     def multimodal_aligned(self, inputs: list[list[Any]], max_retries: int) -> list[Any] | None:
         """One multimodal_embed call with retries; ``None`` if every attempt failed or misaligned."""
-        for attempt in range(1, max_retries + 1):
-            try:
-                response = self.vo.multimodal_embed(inputs=inputs, model=self.model, input_type="document")
-                if len(response.embeddings) != len(inputs):
-                    got = len(response.embeddings)
-                    raise CinematlasError(f"Voyage returned {got} embeddings for {len(inputs)} inputs")
-                return list(response.embeddings)
-            except Exception as e:
-                logger.warning(f"Voyage AI batch embedding failed (Attempt {attempt}/{max_retries}): {e}")
-                if attempt == max_retries:
-                    logger.error("Max retries reached for batch. Populating null vector embeddings.")
-                else:
-                    time.sleep(1.5**attempt)
-        return None
+        vecs, _ = with_retries(lambda: self.vo.multimodal_embed(inputs=inputs, model=self.model, input_type="document"),
+                               expect=len(inputs), retries=max_retries, what="Voyage multimodal embedding")
+        if vecs is None:
+            logger.error("Max retries reached for batch. Populating null vector embeddings.")
+        return vecs
 
     def embed_keyframes_batched(self, scenes: list[dict[str, Any]], batch_size: int = 16, max_retries: int = 3,
                                 transcripts: Sequence[str] | None = None) -> list[list[float] | None]:

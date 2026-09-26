@@ -21,7 +21,7 @@ from __future__ import annotations
 
 import logging
 import os
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from typing import Any
 
 from pymongo import MongoClient
@@ -32,15 +32,13 @@ from . import media
 from . import search as _search
 from ._utils import extract_video_id, redact_url
 from .capabilities import ROUTING_CALIBRATION, routing_calibration
+from .core.collection import Atlas
 from .doctor import Diagnosis, run_doctor
 from .embed import Embedder
 from .exceptions import CinematlasError, DependencyError
 from .indexes import (
-    DEFAULT_AUTO_INDEX,
     DEFAULT_SCENE_INDEX,
     DEFAULT_TEXT_MODEL,
-    DEFAULT_TRANSCRIPT_INDEX,
-    DEFAULT_VISUAL_INDEX,
     IndexStatus,
     TranscriptMode,
     desired_indexes,
@@ -50,6 +48,7 @@ from .indexes import (
 )
 from .ingest import Progress
 from .media import DEFAULT_MAX_DOWNLOAD_MB, UPLOAD_CHUNK_BYTES, YTDLP_FORMAT, VideoFile  # noqa: F401 (re-exported)
+from .query import Search
 from .results import IngestResult, SearchResults
 from .search import DEFAULT_WEIGHTS, SOURCES, SPEECH_WEIGHTS, VISUAL_WEIGHTS  # noqa: F401 (re-exported)
 from .transcribe import DEFAULT_WHISPER_MODEL, Transcriber
@@ -98,17 +97,23 @@ class Cinematlas:
         native_fusion: bool | None = None,
         native_rerank: bool | None = None,
         bson_vectors: bool = True,
+        filters: Sequence[str] = (),
         progress: Progress | None = None,
         mongo_client: MongoClient | None = None,
         voyage_client: Any = None,
         s3_client: Any = None,
         openai_client: Any = None,
+        atlas: Atlas | None = None,
         ping: bool = True,
     ):
         if routing_thresholds is not None and not 0 <= routing_thresholds[0] < routing_thresholds[1] <= 1:
             raise ValueError(f"routing_thresholds must satisfy 0 <= lo < hi <= 1, got {routing_thresholds!r}")
         if transcript_mode not in ("auto", "autoembed", "client"):
             raise ValueError(f"transcript_mode must be 'auto', 'autoembed' or 'client', got {transcript_mode!r}")
+        bad = [f for f in filters if not isinstance(f, str) or not f.isidentifier()]
+        if bad:
+            raise ValueError(f"filters must be metadata field names (identifiers), got {bad!r}")
+        self.filters = tuple(dict.fromkeys(filters))  # metadata fields every search index can pre-filter on
         self.db_name = db_name
         self.collection_name = collection_name
         self.allow_private_urls = allow_private_urls
@@ -128,18 +133,27 @@ class Cinematlas:
             None if transcript_mode == "auto" else transcript_mode  # type: ignore[assignment]
         )
 
-        self.vo = voyage_client if voyage_client is not None else _voyage_client(voyage_api_key)
+        # One Atlas per connection: `atlas.videos(...)` and `atlas.collection(...)` share its Mongo client,
+        # Voyage client and usage. A standalone engine makes its own (and closes it on close()).
+        self._owns_atlas = atlas is None
+        if atlas is None:
+            if mongo_client is None:
+                uri = _resolve_mongo_uri(mongo_uri)
+                if not uri:
+                    raise CinematlasError("No MongoDB URI provided (pass mongo_uri or set MONGODB_URI).")
+                mongo_client = MongoClient(uri, serverSelectionTimeoutMS=5000, appname="cinematlas")
+            vo = voyage_client if voyage_client is not None else _voyage_client(voyage_api_key)
+            atlas = Atlas(mongo_client=mongo_client, voyage_client=vo, model=voyage_model, rerank_model=rerank_model,
+                          db=db_name)
+        self.atlas = atlas
+        self.vo = atlas.vo
+        self.usage = atlas.usage  # Voyage calls, tokens, pixels; .cost(prices) estimates USD
         self._embedder = Embedder(self.vo, model=voyage_model, text_model=text_model, bson_vectors=bson_vectors,
                                   query_cache_size=query_cache_size)
         self._transcriber = Transcriber(openai_client=openai_client or _openai_client(openai_api_key),
                                         whisper_model=whisper_model)
 
-        if mongo_client is None:
-            uri = _resolve_mongo_uri(mongo_uri)
-            if not uri:
-                raise CinematlasError("No MongoDB URI provided (pass mongo_uri or set MONGODB_URI).")
-            mongo_client = MongoClient(uri, serverSelectionTimeoutMS=5000, appname="cinematlas")
-        self.mongo_client = mongo_client
+        self.mongo_client = atlas.client
         self.collection = self.mongo_client[db_name][collection_name]
         if ping:
             try:
@@ -209,7 +223,8 @@ class Cinematlas:
         return f"<Cinematlas {self.db_name}.{self.collection_name} · transcripts={mode} · rerank={rerank}>"
 
     def close(self) -> None:
-        self.mongo_client.close()
+        if self._owns_atlas:  # a video collection from atlas.videos() leaves the shared connection open
+            self.mongo_client.close()
 
     def __enter__(self) -> Cinematlas:
         return self
@@ -245,6 +260,7 @@ class Cinematlas:
         """
         self.collection.create_index([("video_id", 1), ("scene_id", 1)], name="video_scene")
         kwargs.setdefault("scene_index_name", DEFAULT_SCENE_INDEX if self.scene_embeddings else None)
+        kwargs.setdefault("filters", self.filters)
         mode = ensure_search_indexes(self.collection, transcript_mode=self._transcript_mode_setting,
                                      text_model=self.text_model, **kwargs)
         self._resolved_transcript_mode = mode
@@ -271,7 +287,8 @@ class Cinematlas:
 
     def desired_indexes(self) -> dict[str, tuple[str, dict[str, Any]]]:
         """The search indexes this engine's configuration calls for: ``{name: (kind, definition)}``."""
-        return desired_indexes(self.transcript_mode, text_model=self.text_model, scene=self.scene_embeddings)
+        return desired_indexes(self.transcript_mode, text_model=self.text_model, scene=self.scene_embeddings,
+                               filters=self.filters)
 
     def inspect_indexes(self) -> list[IndexStatus]:
         """Each desired index: ``ready`` / ``building`` / ``missing`` / ``failed``, plus definition drift."""
@@ -288,51 +305,36 @@ class Cinematlas:
 
     # ------------------------------------------------------------------ ingest
     def ingest(self, source: VideoFile, *, video_id: str | None = None, filename: str | None = None,
-               scene_threshold: float = 27.0, batch_size: int = 16, progress: Progress | None = None) -> IngestResult:
-        """Ingest anything: a URL (YouTube, file link, scheme optional), a local path, ``bytes``,
-        a binary file object, or a web upload (FastAPI ``UploadFile``, Flask ``FileStorage``).
+               metadata: Mapping[str, Any] | None = None, scene_threshold: float = 27.0, batch_size: int = 16,
+               progress: Progress | None = None) -> IngestResult:
+        """Ingest anything: a URL (YouTube, file link, ``s3://``, ``gs://``, scheme optional), a local path,
+        ``bytes``, a binary file object, or a web upload (FastAPI ``UploadFile``, Flask ``FileStorage``).
 
-        Returns an :class:`IngestResult` (video id, scene counts, timings). ``progress`` is called as
-        ``progress(stage, info)`` for ``fetched``, ``scenes``, ``transcribed``, ``embedded`` and ``stored``.
+        ``metadata`` is stored on every scene as ``metadata.<field>``; fields declared in
+        ``Cinematlas(filters=...)`` can then narrow searches with ``.where(field=value)``.
+
+        Returns an :class:`IngestResult` (video id, scene counts, timings, Voyage usage). ``progress`` is
+        called as ``progress(stage, info)`` for ``fetched``, ``scenes``, ``transcribed``, ``embedded`` and
+        ``stored``.
         """
+        meta = {"metadata": dict(metadata)} if metadata else {}
         kwargs = {"video_id": video_id, "scene_threshold": scene_threshold, "batch_size": batch_size,
                   "progress": progress}
         if isinstance(source, str) and not os.path.isfile(source):
-            return self._ingest_url(source, **kwargs)
-        return self._ingest_file(source, filename=filename, **kwargs)
-
-    def ingest_video(self, video_url: str, video_id: str | None = None, scene_threshold: float = 27.0,
-                     batch_size: int = 16, progress: Progress | None = None) -> int:
-        """Ingest from a URL; returns the number of scenes indexed. See :meth:`ingest` for details."""
-        if os.path.isfile(video_url):
-            return self.ingest_file(video_url, video_id=video_id, scene_threshold=scene_threshold,
-                                    batch_size=batch_size, progress=progress)
-        return self._ingest_url(video_url, video_id=video_id, scene_threshold=scene_threshold,
-                                batch_size=batch_size, progress=progress).scenes
-
-    def ingest_file(self, file: VideoFile, video_id: str | None = None, filename: str | None = None,
-                    scene_threshold: float = 27.0, batch_size: int = 16, progress: Progress | None = None) -> int:
-        """Ingest an uploaded or local file; returns the number of scenes indexed. See :meth:`ingest`."""
-        return self._ingest_file(file, video_id=video_id, filename=filename, scene_threshold=scene_threshold,
-                                 batch_size=batch_size, progress=progress).scenes
-
-    def _ingest_url(self, video_url: str, video_id: str | None = None, scene_threshold: float = 27.0,
-                    batch_size: int = 16, progress: Progress | None = None) -> IngestResult:
-        url = self._validate_remote_url(video_url)
-        safe_url = redact_url(url)  # never persist signatures/tokens; the raw URL is only used to fetch
-        return self._run_pipeline(
-            video_id or extract_video_id(safe_url),
-            fetch=lambda temp_dir: self._download_and_extract_media(url, temp_dir),
-            source={"source_type": "url", "video_url": safe_url},
-            deep_link_base=safe_url, scene_threshold=scene_threshold, batch_size=batch_size, progress=progress,
-        )
+            url = self._validate_remote_url(source)
+            safe_url = redact_url(url)  # never persist signatures/tokens; the raw URL is only used to fetch
+            return self._run_pipeline(
+                video_id or extract_video_id(safe_url),
+                fetch=lambda temp_dir: self._download_and_extract_media(url, temp_dir),
+                source={"source_type": "url", "video_url": safe_url, **meta}, deep_link_base=safe_url,
+                **{k: v for k, v in kwargs.items() if k != "video_id"},
+            )
+        return self._ingest_file(source, filename=filename, meta=meta, **kwargs)
 
     def _ingest_file(self, file: VideoFile, video_id: str | None = None, filename: str | None = None,
-                     scene_threshold: float = 27.0, batch_size: int = 16,
-                     progress: Progress | None = None) -> IngestResult:
-        """Ingest an uploaded or local video file.
-
-        Uploads are streamed to a temp file in chunks. Without ``video_id`` the ID is derived from the
+                     scene_threshold: float = 27.0, batch_size: int = 16, progress: Progress | None = None,
+                     meta: Mapping[str, Any] | None = None) -> IngestResult:
+        """Uploads are streamed to a temp file in chunks. Without ``video_id`` the ID is derived from the
         content hash, so re-uploading the same file replaces it instead of duplicating it.
         """
         stream, filename = self._unwrap_upload(file, filename)
@@ -344,7 +346,8 @@ class Cinematlas:
             return path, self._extract_audio(path, temp_dir)
 
         return self._run_pipeline(  # the content hash is only known after streaming: resolve the ID lazily
-            video_id, fetch=fetch, source={"source_type": "file", "video_url": None, "filename": filename},
+            video_id, fetch=fetch,
+            source={"source_type": "file", "video_url": None, "filename": filename, **(meta or {})},
             deep_link_base=None, scene_threshold=scene_threshold, batch_size=batch_size,
             id_from_content=lambda: f"file_{materialized['sha256'][:16]}",
             extra=lambda: {"content_sha256": materialized.get("sha256")}, progress=progress,
@@ -409,73 +412,22 @@ class Cinematlas:
         return self._embedder.store_vector(vec)
 
     # ------------------------------------------------------------------ search
-    def search(self, query_text: str, top_k: int = 5, video_id: str | None = None, *,
-               sources: Sequence[str] = SOURCES, rerank: bool = True, candidates: int | None = None,
-               weights: dict[str, float] | None = None, routing: str | None = None) -> SearchResults:
+    def search(self, query: str) -> Search:
         """Search what was shown and what was said, down to the exact moment.
 
-        ``routing`` picks the strategy:
+        Returns a lazy :class:`~cinematlas.query.Search`; refine it, then read it like a list::
 
-        * ``"scene"`` (default): the joint keyframe+speech vector ranks scenes in one query; the
-          reranker scores only those scenes' sentences to pick each one's moment.
-        * ``"adaptive"``: all sources fused, weighted per question by the reranker's confidence that
-          it's about speech. Leans ahead on questions about what was said, behind on what was shown.
-        * ``"fixed"``: all sources fused with ``weights``.
+            engine.search("how loud is a sonic boom?").video("abc").where(genre="science").limit(3).top.link
 
-        Passing ``weights`` or ``sources`` without ``routing`` keeps fusion: adaptive routing, or fixed
-        fusion when ``weights`` is given.
-
-        Sources, fused with Reciprocal Rank Fusion (``weights``, default :data:`DEFAULT_WEIGHTS`):
-
-        * ``visual``: keyframe vectors; ``scene``: joint keyframe+speech vectors;
-        * ``transcript``: semantic (autoEmbed or client voyage-4); ``text``: full-text BM25;
-        * ``rerank``: a Voyage reranker scoring every candidate *sentence*.
-
-        Runs as one native ``$rankFusion`` query when the cluster supports it (8.0+), else per-source
-        queries fused client-side; both yield identical rankings. Reranking uses native ``$rerank``
-        when enabled (8.3+), else the Voyage API. Every result carries ``ranks`` (per source),
-        ``relevance``, ``moment`` (best sentence) and ``moment_link``. A failing source is skipped;
-        ``SearchError`` only if every source fails.
+        By default the joint keyframe+speech vector ranks scenes in one query and a sentence reranker
+        picks each scene's moment. ``.adaptive()`` fuses every source (keyframes, joint vectors,
+        transcript semantics, BM25) weighted per question; ``.weights(...)`` fixes the weights;
+        ``.only("visual" | "scene" | "transcript" | "text")`` runs one source alone. Fusion runs as one
+        native ``$rankFusion`` query on 8.0+ (client-side otherwise, same ranking); reranking uses native
+        ``$rerank`` on 8.3+ (the Voyage API otherwise). Every hit carries ``ranks`` per source,
+        ``relevance``, ``moment`` (best sentence) and ``moment_link``.
         """
-        return _search.search(self, query_text, top_k, video_id, sources=sources, rerank=rerank,
-                              candidates=candidates, weights=weights, routing=routing)
-
-    def search_transcript(self, query_text: str, top_k: int = 5, video_id: str | None = None) -> SearchResults:
-        """Semantic search over spoken dialogue using whichever backend this deployment has."""
-        if self.transcript_mode == "autoembed":
-            return self.search_auto_embedded_transcript(query_text, top_k=top_k, video_id=video_id)
-        return self.search_client_embedded_transcript(query_text, top_k=top_k, video_id=video_id)
-
-    def search_client_embedded_transcript(self, query_text: str, top_k: int = 5,
-                                          index_name: str = DEFAULT_TRANSCRIPT_INDEX,
-                                          video_id: str | None = None) -> SearchResults:
-        """Transcript search with client-side ``voyage-4`` query vectors (no autoEmbed required)."""
-        return _search.search_client_transcript(self, query_text, top_k, index_name, video_id)
-
-    def search_auto_embedded_transcript(self, query_text: str, top_k: int = 5, index_name: str = DEFAULT_AUTO_INDEX,
-                                        video_id: str | None = None) -> SearchResults:
-        """Semantic search over transcripts via Atlas Automated Embedding (autoEmbed)."""
-        return _search.search_auto_transcript(self, query_text, top_k, index_name, video_id)
-
-    def search_visual_vector(self, query_text: str, top_k: int = 5, index_name: str = DEFAULT_VISUAL_INDEX,
-                             video_id: str | None = None) -> SearchResults:
-        """Text-to-image search over keyframes using Voyage AI multimodal vectors."""
-        if not query_text:
-            return SearchResults()
-        return self._vector_search(self._embed_multimodal_query(query_text), index_name=index_name,
-                                   path="visual_embedding", top_k=top_k, video_id=video_id)
-
-    def search_scene_vector(self, query_text: str, top_k: int = 5, index_name: str = DEFAULT_SCENE_INDEX,
-                            video_id: str | None = None) -> SearchResults:
-        """Search joint keyframe+transcript vectors (what was shown *and* said, in one vector)."""
-        if not query_text:
-            return SearchResults()
-        return self._vector_search(self._embed_multimodal_query(query_text), index_name=index_name,
-                                   path="scene_embedding", top_k=top_k, video_id=video_id)
-
-    def search_text(self, query_text: str, top_k: int = 5, video_id: str | None = None) -> SearchResults:
-        """Full-text (BM25) transcript search via Atlas Search; best for exact names and numbers."""
-        return _search.search_text(self, query_text, top_k, video_id)
+        return Search(self, query)
 
     def query_cache_info(self) -> dict[str, int]:
         """Query-embedding cache stats: ``hits``, ``misses``, ``size``, ``maxsize``."""
@@ -492,17 +444,16 @@ class Cinematlas:
         return self._embedder.text_query(query_text)
 
     def _vector_search(self, query_vec: list[float], *, index_name: str, path: str, top_k: int,
-                       video_id: str | None) -> SearchResults:
-        return _search.vector_search(self, query_vec, index_name=index_name, path=path, top_k=top_k,
-                                     video_id=video_id)
+                       match: Mapping[str, Any] | None) -> SearchResults:
+        return _search.vector_search(self, query_vec, index_name=index_name, path=path, top_k=top_k, match=match)
 
     def _rerank(self, query: str, texts: list[str]) -> list[tuple[int, float]]:
         res = self.vo.rerank(query, texts, model=self.rerank_model)
         return [(r.index, r.relevance_score) for r in res.results]
 
-    def _source_pipeline(self, name: str, query_text: str, n: int, video_id: str | None,
+    def _source_pipeline(self, name: str, query_text: str, n: int, match: Mapping[str, Any] | None,
                          mm_vec: list[float] | None) -> list[dict[str, Any]]:
-        return _search.source_pipeline(self, name, query_text, n, video_id, mm_vec)
+        return _search.source_pipeline(self, name, query_text, n, match, mm_vec)
 
     def _retrieve_native(self, pipelines: dict[str, list[dict[str, Any]]], weights: dict[str, float], n: int) -> Any:
         return _search.retrieve_native(self, pipelines, weights, n)

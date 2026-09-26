@@ -192,8 +192,8 @@ def create_app(engine: Cinematlas, *, media_dir: Path = DEFAULT_MEDIA_DIR) -> An
     def search(q: str, k: int = 6, video_id: str | None = None, mode: str = "scene") -> dict[str, Any]:
         if mode not in ("scene", "adaptive"):
             raise HTTPException(400, "mode is 'scene' or 'adaptive'")
-        results = engine.search(q, top_k=max(1, min(k, 20)), video_id=video_id or None,
-                                routing=None if mode == "scene" else "adaptive")
+        results = engine.search(q).video(video_id or "").limit(max(1, min(k, 20)))
+        results = (results.adaptive() if mode == "adaptive" else results).run()
         return {
             "query": q,
             "speech_confidence": results.speech_confidence,

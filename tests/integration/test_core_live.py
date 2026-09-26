@@ -35,15 +35,15 @@ def test_joint_vectors_search_filter_and_find_the_sentence(products):
     assert coll.add(records).added == 3
     coll.wait_until_searchable(timeout_s=180)
 
-    hits = coll.search("shoes for running in mud", k=3, where={"run": run})
+    hits = coll.search("shoes for running in mud").where(run=run).limit(3).run()
     assert hits.top["sku"] == f"{run}-r1"
     assert "mud" in hits.top.text.lower(), "the reranker picks the sentence that answers"
     assert "swatch" not in hits.top and "embedding" not in hits.top
 
-    only_bags = coll.search("something to carry a laptop", k=3, where={"run": run, "category": "bags"})
+    only_bags = coll.search("something to carry a laptop").where(run=run, category="bags").limit(3).run()
     assert [h["category"] for h in only_bags] == ["bags"]
 
-    by_picture = coll.search(PILImage.new("RGB", (64, 64), "green"), k=3, where={"run": run})
+    by_picture = coll.search(PILImage.new("RGB", (64, 64), "green")).where(run=run).limit(3).run()
     assert by_picture.top["sku"] == f"{run}-g1", "an image query finds the record with that swatch"
 
     coll.add([{**records[0], "title": "Trail running shoe v2"}])  # same key: replaced, not duplicated

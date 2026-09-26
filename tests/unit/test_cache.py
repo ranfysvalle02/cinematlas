@@ -79,9 +79,9 @@ def indexed(engine, fake_mongo):
 
 
 def test_repeated_searches_skip_voyage_and_return_identical_results(indexed, fake_voyage):
-    first = indexed.search("sonic boom", rerank=False, routing="adaptive")
+    first = indexed.search("sonic boom").rerank(False).routing("adaptive").run()
     embeds_after_first = [c for c in fake_voyage.calls if "colours" in c or "texts" in c]
-    second = indexed.search("sonic boom", rerank=False, routing="adaptive")
+    second = indexed.search("sonic boom").rerank(False).routing("adaptive").run()
     embeds_after_second = [c for c in fake_voyage.calls if "colours" in c or "texts" in c]
     assert second == first
     assert len(embeds_after_first) == 2 and len(embeds_after_second) == 2  # multimodal + text, once each
@@ -89,10 +89,10 @@ def test_repeated_searches_skip_voyage_and_return_identical_results(indexed, fak
 
 
 def test_cache_keys_are_exact_and_model_specific(indexed, fake_voyage):
-    indexed.search_visual_vector("Sonic boom")
-    indexed.search_visual_vector("sonic boom")  # different text -> different key
+    indexed.search("Sonic boom").only("visual").run()
+    indexed.search("sonic boom").only("visual").run()  # different text -> different key
     indexed.model = "voyage-multimodal-4"
-    indexed.search_visual_vector("sonic boom")  # different model -> different key
+    indexed.search("sonic boom").only("visual").run()  # different model -> different key
     assert len([c for c in fake_voyage.calls if "colours" in c]) == 3
 
 
@@ -100,12 +100,12 @@ def test_cache_can_be_disabled_and_cleared(fake_mongo, fake_voyage):
     from cinematlas import Cinematlas
 
     eng = Cinematlas(mongo_client=fake_mongo, voyage_client=fake_voyage, ping=False, query_cache_size=0)
-    eng.search_visual_vector("q")
-    eng.search_visual_vector("q")
+    eng.search("q").only("visual").run()
+    eng.search("q").only("visual").run()
     assert len(fake_voyage.calls) == 2
 
     eng2 = Cinematlas(mongo_client=fake_mongo, voyage_client=fake_voyage, ping=False)
-    eng2.search_visual_vector("q")
+    eng2.search("q").only("visual").run()
     eng2.clear_query_cache()
-    eng2.search_visual_vector("q")
+    eng2.search("q").only("visual").run()
     assert len(fake_voyage.calls) == 4 and eng2.query_cache_info()["misses"] == 1

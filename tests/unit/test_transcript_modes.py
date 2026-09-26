@@ -15,7 +15,7 @@ def make_engine(monkeypatch, *, autoembed_supported=True, **kwargs):
     mongo = FakeMongoClient()
     mongo.collection = FakeCollection(autoembed_supported=autoembed_supported)
     voyage = FakeVoyage()
-    monkeypatch.setattr("cinematlas.embed.time.sleep", lambda _s: None)
+    monkeypatch.setattr("cinematlas.usage.time.sleep", lambda _s: None)
     return Cinematlas(mongo_client=mongo, voyage_client=voyage, ping=False, **kwargs), mongo.collection, voyage
 
 
@@ -101,7 +101,7 @@ def local_serve(colour_video):
 def test_client_mode_stores_transcript_vectors_aligned_per_scene(monkeypatch, local_serve):
     eng, coll, voyage = make_engine(monkeypatch, transcript_mode="client", text_model="voyage-4-lite")
     local_serve(eng)
-    eng.ingest_video(URL)
+    eng.ingest(URL)
 
     by_scene = {d["scene_id"]: d for d in coll.docs}
     # FakeVoyage.embed encodes len(text), so each vector proves which transcript it belongs to.
@@ -116,7 +116,7 @@ def test_client_mode_stores_transcript_vectors_aligned_per_scene(monkeypatch, lo
 def test_autoembed_mode_stores_no_client_vectors_and_makes_no_text_calls(monkeypatch, local_serve):
     eng, coll, voyage = make_engine(monkeypatch, transcript_mode="autoembed")
     local_serve(eng)
-    eng.ingest_video(URL)
+    eng.ingest(URL)
     assert all("transcript_embedding" not in d for d in coll.docs)
     assert not [c for c in voyage.calls if "texts" in c]
 
@@ -129,13 +129,13 @@ def test_transcript_embedding_failure_degrades_to_null_vectors(monkeypatch, loca
         raise RuntimeError("503")
 
     voyage.embed = always_fail
-    assert eng.ingest_video(URL) == 3
+    assert eng.ingest(URL).scenes == 3
     assert all(d["transcript_embedding"] is None for d in coll.docs)
 
 
 def test_search_transcript_dispatches_to_client_vectors(monkeypatch):
     eng, coll, voyage = make_engine(monkeypatch, transcript_mode="client")
-    eng.search_transcript("elephants", top_k=2, video_id="v")
+    eng.search("elephants").only("transcript").limit(2).video("v").run()
     stage = coll.pipelines[-1][0]["$vectorSearch"]
     assert stage["index"] == "cinematlas_transcript_index"
     assert stage["path"] == "transcript_embedding"
@@ -146,7 +146,7 @@ def test_search_transcript_dispatches_to_client_vectors(monkeypatch):
 
 def test_search_transcript_dispatches_to_autoembed_text_query(monkeypatch):
     eng, coll, voyage = make_engine(monkeypatch, transcript_mode="autoembed")
-    eng.search_transcript("elephants", top_k=2)
+    eng.search("elephants").only("transcript").limit(2).run()
     stage = coll.pipelines[-1][0]["$vectorSearch"]
     assert stage["index"] == "cinematlas_auto_index" and stage["query"] == "elephants"
     assert voyage.calls == []  # Atlas embeds the query itself

@@ -103,7 +103,7 @@ def test_ingest_stores_joint_vectors_and_silent_scenes_reuse_keyframe_vector(eng
     monkeypatch.setattr(engine, "_download_and_extract_media",
                         lambda u, d: (shutil.copy(colour_video, f"{d}/in.mp4"), None))
     monkeypatch.setattr(engine, "_transcribe_audio_safe", lambda _p: [{"start": 0.2, "end": 1.2, "text": "hi"}])
-    engine.ingest_video("https://youtu.be/abcdefghijk")
+    engine.ingest("https://youtu.be/abcdefghijk")
     docs = sorted(fake_mongo.collection.docs, key=lambda d: d["scene_id"])
     assert docs[0]["scene_embedding"] is not None
     assert as_list(docs[1]["scene_embedding"]) == as_list(docs[1]["visual_embedding"])  # no speech -> no extra call

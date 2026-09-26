@@ -21,18 +21,18 @@ with engine(YOURS) as eng:
 
     print(f"\nIndexing {SOURCE}")
     result = eng.ingest(SOURCE, progress=lambda stage, info: print(f"  ✓ {stage:<12} {info}"))
-    print(f"\n{result}")
+    print(f"\n{result}\n{eng.usage}")
 
     # Atlas syncs new documents into its search indexes asynchronously, usually within seconds.
     # Wait until every spoken scene is searchable, or early answers come from a partial index.
     deadline = time.monotonic() + 120
-    while len(eng.search_transcript("the", top_k=500, video_id=result.video_id)) < result.spoken_scenes:
+    while len(eng.search("the").only("transcript").video(result.video_id).limit(500)) < result.spoken_scenes:
         if time.monotonic() > deadline:
             raise SystemExit("Indexed, but Atlas is still syncing its search indexes. Try again in a minute.")
         time.sleep(2)
 
     print(f"\nQ: {QUESTION}")
-    results = eng.search(QUESTION, top_k=3, video_id=result.video_id)
+    results = eng.search(QUESTION).video(result.video_id).limit(3).run()
 
 for i, hit in enumerate(results, 1):
     where = hit.link or f"{SOURCE}, at {hit.timestamp}"  # local files have no URL to deep-link

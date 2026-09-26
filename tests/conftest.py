@@ -30,7 +30,7 @@ def fake_mongo():
 @pytest.fixture
 def engine(fake_mongo, fake_voyage, monkeypatch):
     monkeypatch.delenv("OPENAI_API_KEY", raising=False)
-    for module in ("cinematlas.embed", "cinematlas.media"):  # no real backoff in unit tests
+    for module in ("cinematlas.usage", "cinematlas.media"):  # no real backoff in unit tests
         monkeypatch.setattr(f"{module}.time.sleep", lambda _s: None)
     # Unit tests never touch DNS: every host "resolves" to a public documentation address.
     monkeypatch.setattr("cinematlas.urlsafety.socket.getaddrinfo", fake_resolver({}))

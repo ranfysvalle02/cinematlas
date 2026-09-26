@@ -38,7 +38,7 @@ def test_transcript_search_ranks_by_meaning_not_keywords(backend, run_id, cleanu
 
     # No lexical overlap with the target transcript: only semantics can find it.
     results = eventually(
-        lambda: (r := eng.search_transcript("space exploration", top_k=3, video_id=run_id)) and len(r) == 3 and r
+        lambda: (r := eng.search("space exploration").only("transcript").limit(3).video(run_id)) and len(r) == 3 and r
     )
     assert results, f"{mode}: search never returned all 3 documents"
     assert results[0]["scene_id"] == 1
@@ -57,7 +57,7 @@ def test_video_id_filter_isolates_results(backend, run_id, cleanup):
             doc["transcript_embedding"] = vec
         eng.collection.insert_one(doc)
 
-    results = eventually(lambda: eng.search_transcript("library", video_id=f"{run_id}-other"))
+    results = eventually(lambda: eng.search("library").only("transcript").video(f"{run_id}-other"))
     assert results and {r["video_id"] for r in results} == {f"{run_id}-other"}
 
 
@@ -73,7 +73,7 @@ def test_synthetic_video_visual_and_spoken_search(backend, run_id, cleanup, tmp_
         {"start": 3.1, "end": 4.4, "text": "Waves crash against the hull far out at sea."},
     ])
 
-    assert eng.ingest_video("https://example.com/v.mp4", video_id=run_id) == 3
+    assert eng.ingest("https://example.com/v.mp4", video_id=run_id).scenes == 3
     stored = list(eng.collection.find({"video_id": run_id}))
     assert all(len(as_list(d["visual_embedding"])) == 1024 for d in stored)
     if mode == "client":
@@ -81,13 +81,13 @@ def test_synthetic_video_visual_and_spoken_search(backend, run_id, cleanup, tmp_
     else:
         assert all("transcript_embedding" not in d for d in stored)
 
-    visual = eventually(lambda: (r := eng.search_visual_vector(
-        "a solid bright red image", top_k=3, video_id=run_id)) and len(r) == 3 and r)
+    red = eng.search("a solid bright red image").only("visual").limit(3).video(run_id)
+    visual = eventually(lambda: (r := red.limit(3).run()) and len(r) == 3 and r)
     assert visual and visual[0]["scene_id"] == 0
-    assert eng.search_visual_vector("a solid blue image", top_k=3, video_id=run_id)[0]["scene_id"] == 2
+    assert eng.search("a solid blue image").only("visual").limit(3).video(run_id)[0]["scene_id"] == 2
 
-    spoken = eventually(lambda: (r := eng.search_transcript(
-        "winter weather", top_k=3, video_id=run_id)) and len(r) == 3 and r)
+    spoken = eventually(lambda: (r := eng.search("winter weather").only("transcript").limit(3).video(run_id).run())
+                        and len(r) == 3 and r)
     assert spoken and spoken[0]["scene_id"] == 1
     assert spoken[0]["deep_link"] == "https://example.com/v.mp4#t=1"
 
@@ -107,7 +107,7 @@ def _assert_real_clip_indexed(eng, vid):
 def _assert_real_clip_searchable(eng, vid):
     # Each question must come back as the *scene* that answers it, through Atlas, on real speech.
     def top(query):
-        hits = eventually(lambda: (r := eng.search_transcript(query, top_k=4, video_id=vid)) and len(r) >= 3 and r)
+        hits = eventually(lambda: (r := eng.search(query).only("transcript").limit(4).video(vid)) and len(r) >= 3 and r)
         assert hits, f"no results for {query!r}"
         return hits[0]
 
@@ -119,7 +119,7 @@ def _assert_real_clip_searchable(eng, vid):
     # Default: the joint vector ranks scenes, reranked sentences pick the exact moment.
     question = "how many medals has the beer won?"
     # Wait for the joint vectors to sync: until then the default correctly falls back to fusion.
-    hits = eventually(lambda: (r := eng.search(question, top_k=3, video_id=vid)) and "scene" in r[0]["ranks"]
+    hits = eventually(lambda: (r := eng.search(question).limit(3).video(vid)) and "scene" in r[0]["ranks"]
                       and "rerank" in r[0]["ranks"] and r)
     assert hits and hits[0]["scene_id"] == 3
     assert "medals" in hits[0]["moment"]["text"].lower()
@@ -127,12 +127,12 @@ def _assert_real_clip_searchable(eng, vid):
     assert set(hits[0]["ranks"]) == {"scene", "rerank"}
 
     # Adaptive routing: every source fused in one $rankFusion query, same scene, same moment.
-    fused = eventually(lambda: (r := eng.search(question, top_k=3, video_id=vid, routing="adaptive"))
+    fused = eventually(lambda: (r := eng.search(question).limit(3).video(vid).routing("adaptive"))
                        and "rerank" in r[0]["ranks"] and r)
     assert fused and fused[0]["scene_id"] == 3 and "medals" in fused[0]["moment"]["text"].lower()
     assert set(fused[0]["ranks"]) >= {"visual", "scene", "transcript", "rerank"}
 
-    visual = eventually(lambda: eng.search_visual_vector("a person being interviewed", top_k=4, video_id=vid))
+    visual = eventually(lambda: eng.search("a person being interviewed").only("visual").limit(4).video(vid))
     assert visual and {r["video_id"] for r in visual} == {vid}
     assert [r["score"] for r in visual] == sorted((r["score"] for r in visual), reverse=True)
 
@@ -147,7 +147,7 @@ def test_real_url_end_to_end(backend, run_id, cleanup, test_whisper_model, clip_
     monkeypatch.setattr(eng, "allow_private_urls", True)  # the fixture server is on loopback
     url = f"{clip_server}/x59_quiet_crew.mp4"
 
-    assert eng.ingest_video(url, video_id=run_id) == 4
+    assert eng.ingest(url, video_id=run_id).scenes == 4
     docs = _assert_real_clip_indexed(eng, run_id)
     assert {d["source_type"] for d in docs} == {"url"}
     assert docs[1]["deep_link"] == f"{url}#t={int(docs[1]['timestamp_start'])}"
@@ -164,7 +164,7 @@ def test_real_file_upload_end_to_end(backend, run_id, cleanup, test_whisper_mode
 
     with open(real_clip, "rb") as fh:
         upload = SimpleNamespace(file=fh, filename="quiet-crew.mp4")  # FastAPI UploadFile shape
-        assert eng.ingest_file(upload, video_id=run_id) == 4
+        assert eng.ingest(upload, video_id=run_id).scenes == 4
     docs = _assert_real_clip_indexed(eng, run_id)
     assert {d["source_type"] for d in docs} == {"file"}
     assert {d["filename"] for d in docs} == {"quiet-crew.mp4"}

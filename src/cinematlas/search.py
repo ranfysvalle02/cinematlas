@@ -7,7 +7,7 @@ the engine, and this module holds only how a question becomes ranked moments.
 from __future__ import annotations
 
 import logging
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from typing import Any, Protocol
 
 from pymongo.errors import PyMongoError
@@ -67,7 +67,6 @@ class SearchHost(Protocol):
     def _embed_multimodal_query(self, query_text: str) -> list[float]: ...
     def _embed_text_query(self, query_text: str) -> list[float]: ...
     def _rerank(self, query: str, texts: list[str]) -> list[tuple[int, float]]: ...
-    def search(self, query_text: str, top_k: int = 5, video_id: str | None = None, **kw: Any) -> SearchResults: ...
 
 
 # ---------------------------------------------------------------------- single sources
@@ -79,58 +78,58 @@ def run(collection: Any, pipeline: list[dict[str, Any]], what: str) -> SearchRes
 
 
 def vector_search(host: SearchHost, query_vec: list[float], *, index_name: str, path: str, top_k: int,
-                  video_id: str | None) -> SearchResults:
+                  match: Mapping[str, Any] | None) -> SearchResults:
     pipeline = build_vector_search_pipeline(index_name=index_name, path=path, top_k=top_k, query_vector=query_vec,
-                                            video_id=video_id)
+                                            match=match)
     return run(host.collection, pipeline, f"MongoDB vector search on {index_name!r}")
 
 
 def search_client_transcript(host: SearchHost, query_text: str, top_k: int, index_name: str,
-                             video_id: str | None) -> SearchResults:
+                             match: Mapping[str, Any] | None) -> SearchResults:
     if not query_text:
         return SearchResults()
     pipeline = build_vector_search_pipeline(index_name=index_name, path="transcript_embedding", top_k=top_k,
-                                            query_vector=host._embed_text_query(query_text), video_id=video_id)
+                                            query_vector=host._embed_text_query(query_text), match=match)
     return run(host.collection, pipeline, "Atlas Vector Search")
 
 
 def search_auto_transcript(host: SearchHost, query_text: str, top_k: int, index_name: str,
-                           video_id: str | None) -> SearchResults:
+                           match: Mapping[str, Any] | None) -> SearchResults:
     if not query_text:
         return SearchResults()
     pipeline = build_vector_search_pipeline(index_name=index_name, path="transcript", top_k=top_k,
-                                            query_text=query_text, video_id=video_id)
+                                            query_text=query_text, match=match)
     return run(host.collection, pipeline, "Atlas Vector Search")
 
 
-def search_text(host: SearchHost, query_text: str, top_k: int, video_id: str | None) -> SearchResults:
+def search_text(host: SearchHost, query_text: str, top_k: int, match: Mapping[str, Any] | None) -> SearchResults:
     if not query_text:
         return SearchResults()
-    pipeline = [build_text_search_stage(DEFAULT_TEXT_INDEX, query_text, video_id), {"$limit": top_k},
+    pipeline = [build_text_search_stage(DEFAULT_TEXT_INDEX, query_text, match), {"$limit": top_k},
                 {"$project": {**{k: v for k, v in SEARCH_PROJECTION.items() if k != "score"},
                               "score": {"$meta": "searchScore"}}}]
     return run(host.collection, pipeline, "Atlas full-text search")
 
 
 # ---------------------------------------------------------------------- fusion
-def source_pipeline(host: SearchHost, name: str, query_text: str, n: int, video_id: str | None,
+def source_pipeline(host: SearchHost, name: str, query_text: str, n: int, match: Mapping[str, Any] | None,
                     mm_vec: list[float] | None) -> list[dict[str, Any]]:
     """The retrieval pipeline for one source (usable standalone or inside ``$rankFusion``)."""
     if name == "text":
-        return [build_text_search_stage(DEFAULT_TEXT_INDEX, query_text, video_id), {"$limit": n}]
+        return [build_text_search_stage(DEFAULT_TEXT_INDEX, query_text, match), {"$limit": n}]
     if name == "transcript":
         if host.transcript_mode == "autoembed":
             stage = build_vector_search_pipeline(index_name=DEFAULT_AUTO_INDEX, path="transcript", top_k=n,
-                                                 query_text=query_text, video_id=video_id)[0]
+                                                 query_text=query_text, match=match)[0]
         else:
             stage = build_vector_search_pipeline(index_name=DEFAULT_TRANSCRIPT_INDEX, path="transcript_embedding",
                                                  top_k=n, query_vector=host._embed_text_query(query_text),
-                                                 video_id=video_id)[0]
+                                                 match=match)[0]
         return [stage]
     index, path = ((DEFAULT_VISUAL_INDEX, "visual_embedding") if name == "visual"
                    else (DEFAULT_SCENE_INDEX, "scene_embedding"))
     return [build_vector_search_pipeline(index_name=index, path=path, top_k=n, query_vector=mm_vec,
-                                         video_id=video_id)[0]]
+                                         match=match)[0]]
 
 
 def retrieve_native(host: SearchHost, pipelines: dict[str, list[dict[str, Any]]], weights: dict[str, float],
@@ -173,10 +172,10 @@ def rerank_scenes(host: SearchHost, query_text: str, docs: dict[SceneKey, dict[s
     return rerank_segments(host._rerank, query_text, list(docs.values()))
 
 
-def search(host: SearchHost, query_text: str, top_k: int = 5, video_id: str | None = None, *,
+def search(host: SearchHost, query_text: str, top_k: int = 5, match: Mapping[str, Any] | None = None, *,
            sources: Sequence[str] = SOURCES, rerank: bool = True, candidates: int | None = None,
            weights: dict[str, float] | None = None, routing: str | None = None) -> SearchResults:
-    """See :meth:`cinematlas.Cinematlas.search`."""
+    """Rank scenes for ``query_text``; see :class:`cinematlas.query.Search` for the public interface."""
     if not query_text:
         return SearchResults()
     if not isinstance(top_k, int) or top_k < 1:
@@ -187,8 +186,8 @@ def search(host: SearchHost, query_text: str, top_k: int = 5, video_id: str | No
     if routing is None:
         if weights is None and tuple(sources) == SOURCES and host.scene_embeddings:
             try:
-                results = host.search(query_text, top_k, video_id, rerank=rerank, candidates=candidates,
-                                      routing="scene")
+                results = search(host, query_text, top_k, match, rerank=rerank, candidates=candidates,
+                                 routing="scene")
                 if results:  # empty: scenes ingested before scene vectors existed; fuse instead
                     return results
             except SearchError as e:  # no scene index here (older deployment): fuse everything instead
@@ -210,7 +209,7 @@ def search(host: SearchHost, query_text: str, top_k: int = 5, video_id: str | No
     errors: dict[str, Exception] = {}
     for name in sources:
         try:
-            pipelines[name] = source_pipeline(host, name, query_text, n, video_id, mm_vec)
+            pipelines[name] = source_pipeline(host, name, query_text, n, match, mm_vec)
         except SearchError as e:
             errors[name] = e
 

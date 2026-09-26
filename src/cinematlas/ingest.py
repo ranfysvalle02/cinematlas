@@ -29,6 +29,7 @@ class IngestHost(Protocol):
     scene_embeddings: bool
     max_scene_seconds: float | None
     progress: Progress | None
+    usage: Any  # cinematlas.usage.Usage
 
     @property
     def transcript_mode(self) -> str: ...
@@ -69,6 +70,8 @@ def run_pipeline(
     started = time.perf_counter()
     stages: dict[str, float] = {}
     clock = [started]
+    usage = getattr(host, "usage", None)
+    usage_before = usage.snapshot() if usage is not None else {}
 
     def stage(name: str, **info: Any) -> None:
         now = time.perf_counter()
@@ -120,7 +123,7 @@ def run_pipeline(
             return IngestResult(
                 video_id=vid, scenes=count, source_type=source["source_type"], transcript_mode=mode,
                 seconds=round(time.perf_counter() - started, 2), spoken_scenes=sum(bool(t) for t in transcripts),
-                stages=stages,
+                stages=stages, usage=usage.since(usage_before) if usage is not None else {},
             )
 
         except Exception as e:

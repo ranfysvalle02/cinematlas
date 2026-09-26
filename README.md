@@ -3,7 +3,7 @@
 **Ask a question. Get the second in the video that answers it.**
 
 ```bash
-pip install "cinematlas[whisper]"
+pip install "cinematlas[video,whisper]"
 cinematlas doctor
 cinematlas ingest "https://www.youtube.com/watch?v=5NhYvbMdbBU"
 cinematlas search "how loud is a sonic boom?"
@@ -61,7 +61,7 @@ which failed. [TL;DR](https://github.com/ranfysvalle02/cinematlas/blob/main/TLDR
 [review](https://github.com/ranfysvalle02/cinematlas/blob/main/REVIEW.md)
 
 **In the library:** video `search()` ranks scenes with the joint vector and uses a reranker only to pick
-the exact second (`routing="adaptive"` leans ahead on speech questions, at twice the latency).
+the exact second (`.adaptive()` leans ahead on speech questions, at twice the latency).
 `cinematlas.core` applies both halves to any records: `Text("title") + Image("photo")` to fuse,
 `Text("body", chunk=…)` to chunk.
 
@@ -83,16 +83,38 @@ engine.ensure_indexes()                                  # once; idempotent
 engine.ingest("https://www.youtube.com/watch?v=5NhYvbMdbBU")   # NASA: 60 Second Science, Sonic Booms
 engine.ingest("lecture.mov")                             # or a URL, bytes, file object, web upload
 
-results = engine.search("how loud is a sonic boom?")     # the scene, down to the second
+results = engine.search("how loud is a sonic boom?")     # lazy; runs on first read
 results.top.link                                         # 'https://www.youtube.com/watch?v=5NhYvbMdbBU&t=56s'
 results.top.text                                         # 'Sonic booms can be about as loud as a balloon popping.'
 results.top.explain()                                    # rank per source, relevance, score
 
-engine.search_scene_vector("an airplane in the sky")    # the joint vector alone: scenes only, ~100 ms
+engine.search("an airplane in the sky").only("scene")   # the joint vector alone: scenes only, ~100 ms
 ```
+
+Narrow any search by video or by your own metadata. Declare the filter fields once, and they're
+built into every search index, so filtering happens before ranking:
+
+```python
+engine = Cinematlas(filters=("genre", "course"))
+engine.ensure_indexes()
+engine.ingest("lecture.mov", metadata={"genre": "lecture", "course": "cs101"})
+
+engine.search("when is the exam?").where(course="cs101").limit(3)
+engine.search("the rocket launch").video("5NhYvbMdbBU", "abc123").where(genre=["science", "news"])
+```
+
+Plain `pip install cinematlas` is search-only (pymongo + voyageai), so it can serve queries from a
+backend. Ingesting video needs `cinematlas[video]` (OpenCV, PySceneDetect, yt-dlp), and speech-to-text
+needs `whisper` (or an `OPENAI_API_KEY`).
 
 Results are plain dicts underneath (`json.dumps` works). Cinematlas doesn't pick an LLM for you;
 `results.to_context()` gives you numbered, citable excerpts to pass to one.
+
+Every Voyage call is metered. `result.usage` is what one ingest sent (per model: calls, inputs,
+tokens, image pixels), `engine.usage` is the running total, and `engine.usage.cost(prices)` turns it
+into dollars at the [prices](https://docs.voyageai.com/docs/pricing) you pass. Rate limits (429) back
+off longer than other errors, with jitter. A notebook version of this lives in
+[`docs/quickstart.ipynb`](https://github.com/ranfysvalle02/cinematlas/blob/main/docs/quickstart.ipynb).
 
 ---
 
@@ -114,10 +136,26 @@ photos.add(records)                            # any iterable of dicts, or a loa
 photos.wait_until_searchable()
 
 photos.search("astronaut fixing a telescope in space").top.title   # 'Making Room for Hubble's New Camera'
-photos.search(Image("mars.jpg"), where={"center": "JPL"})           # query by picture, filtered
+photos.search(Image("mars.jpg")).where(center="JPL")               # query by picture, filtered
 ```
 
 That output is real: [`examples/photos.py`](https://github.com/ranfysvalle02/cinematlas/blob/main/examples/photos.py) indexes about 200 NASA photos and runs it.
+
+Video and records share one connection. `atlas.videos(...)` is a video collection on the same cluster,
+with the same Voyage client, the same `usage` meter, the same retries, and the same query builder
+(`.where`, `.limit`, `.rerank`, `.candidates`):
+
+```python
+from cinematlas.core import Atlas, Slides
+
+atlas = Atlas()
+talks = atlas.videos("media.talks", filters=("course",))       # everything Cinematlas does, shared connection
+slides = atlas.collection("media.slides", like=Slides)
+
+talks.search("when is the exam?").where(course="cs101").top.link
+slides.search("the exam schedule").where(deck="week1").top.text
+print(atlas.usage)                                              # both, on one meter
+```
 
 **Long text? Chunk it, fused.** `Text("body", chunk=800)` splits long text into its paragraphs (up to 800
 characters each) and embeds each piece *together with the record's other parts*; search keeps each
@@ -236,7 +274,7 @@ uv run python examples/photos.py "a rover's tracks on red sand" --center JPL
    ├─ joint-vector search over scenes                                        one query, ranks scenes
    └─ $rerank over those scenes' sentences                                   picks the second
 
- search(question, routing="adaptive")
+ search(question).adaptive()
    ├─ $rankFusion over scene, keyframe, transcript and BM25 retrieval        one query
    └─ weights set per question by the reranker's confidence                  said vs shown
 ```
@@ -244,13 +282,14 @@ uv run python examples/photos.py "a rover's tracks on red sand" --center JPL
 | Need | Call |
 | --- | --- |
 | The scene and the exact second (default) | `search(q)` |
-| Mostly questions about speech | `search(q, routing="adaptive")` |
-| The scene, fastest | `search_scene_vector(q)` |
-| Speech only | `search(q, sources=("transcript", "text"))` |
-| Your own blend | `search(q, weights={"scene": 2, "transcript": 1, "rerank": 1})` |
-| One source | `search_transcript` · `search_text` · `search_visual_vector` · `search_scene_vector` |
+| Mostly questions about speech | `search(q).adaptive()` |
+| The scene, fastest | `search(q).only("scene")` |
+| Speech only | `search(q).using("transcript", "text")` |
+| Your own blend | `search(q).weights(scene=2, transcript=1, rerank=1)` |
+| One source | `.only("transcript")` · `.only("text")` · `.only("visual")` · `.only("scene")` |
 
-All of them accept `video_id=`. Every hit carries `moment` (`{start, end, text}`), `moment_link`
+Each one chains with `.video(...)`, `.where(...)`, `.limit(k)` and `.rerank(False)`. Each call returns
+a new query, so a base query can be shared and refined safely. Every hit carries `moment` (`{start, end, text}`), `moment_link`
 (YouTube `?t=431s`, files `#t=431`), `ranks`, `relevance` and the scene's fields.
 
 `ingest()` accepts:

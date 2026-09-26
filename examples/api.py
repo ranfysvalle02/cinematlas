@@ -32,4 +32,4 @@ def upload(file: UploadFile) -> dict:
 def search(q: str, k: int = 5, video_id: str | None = None) -> list[dict]:
     """The best moments for a question, each with a link to the exact second."""
     return [{"video_id": h.video_id, "at": h.timestamp, "text": h.text, "link": h.link, "why": h.explain()}
-            for h in eng.search(q, top_k=min(k, 20), video_id=video_id)]
+            for h in eng.search(q).video(video_id or "").limit(min(k, 20))]

@@ -26,7 +26,7 @@ HOST = os.getenv("OLLAMA_HOST", "http://localhost:11434")
 question = " ".join(sys.argv[1:]) or "What first got these people interested in aviation?"
 
 with engine() as eng:
-    hits = eng.search(question, top_k=4)
+    hits = eng.search(question).limit(4).run()
 if not hits:
     raise SystemExit("No matching moments to answer from.")
 
