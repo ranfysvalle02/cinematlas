@@ -1,6 +1,6 @@
 # Up next
 
-What to build next, checked against the code as of 0.16.2. Release history: [whats-new.md](https://github.com/ranfysvalle02/cinematlas/blob/main/whats-new.md). A lot of the outside wishlist was already
+What to build next, checked against the code as of 0.16.3. Release history: [whats-new.md](https://github.com/ranfysvalle02/cinematlas/blob/main/whats-new.md). A lot of the outside wishlist was already
 built, so this file starts by saying what exists. That keeps us from building it twice.
 
 ## Already shipped (no work needed)

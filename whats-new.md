@@ -6,7 +6,13 @@ See [the migration table](#upgrading-from-013).
 
 ---
 
-## 0.16.2 · 2026-09-26 10:45 · *this release*
+## 0.16.3 · 2026-09-26 11:09 · *this release*
+
+Docs only. A table in the README (the chunking results) swallowed the paragraph below it on GitHub
+and PyPI. It now renders correctly, and every markdown file was re-checked for the same problem. The
+README's unit-test timing is updated, and GitHub releases now exist for 0.15.0 through 0.16.3.
+
+## 0.16.2 · 2026-09-26 10:45
 
 **The quickstart works on a fresh cluster, and every document matches the code.**
 

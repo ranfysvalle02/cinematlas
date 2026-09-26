@@ -51,6 +51,7 @@ Embed the photo together with *each chunk* instead:
 | one joint vector per record | 0.54 |
 | chunked late fusion (ideal chunk boundaries) | 0.81 |
 | **the photo fused into each chunk** (ideal boundaries) | **0.94** |
+
 Ideal boundaries aren't needed. Strip the paragraph breaks so a chunker has to find the topics itself,
 and `Semantic` (cut where adjacent sentences stop being similar) scores **0.90 against 0.93** for ideal
 boundaries, statistically indistinguishable; fixed-size chunks score 0.82–0.85 and one vector per record
@@ -372,7 +373,7 @@ cinematlas/
 
 ```bash
 uv sync
-uv run pytest -m "not integration and not media"    # unit, offline (~9 s)
+uv run pytest -m "not integration and not media"    # unit, offline (~13 s)
 uv run pytest -m media                               # real ffmpeg / Whisper on a committed NASA fixture
 uv run pytest -m integration                         # live Atlas + Docker Atlas Local (reads .env)
 uv run python bench/ingest.py                        # benchmark corpora, once: interviews,
