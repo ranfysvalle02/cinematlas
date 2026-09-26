@@ -67,6 +67,24 @@ def _build_parser() -> argparse.ArgumentParser:
 
 
 def _progress_printer(stream: Any) -> Any:
+    """A tqdm bar over the five ingest stages on a terminal (if tqdm is installed), else one line per stage."""
+    if getattr(stream, "isatty", lambda: False)():
+        try:
+            from tqdm import tqdm
+        except ImportError:
+            pass
+        else:
+            bar = tqdm(total=len(_STAGE_LABELS), file=stream, unit="stage", leave=True,
+                       bar_format="  {bar:20} {n}/{total} {desc}")
+
+            def advance(stage: str, info: dict[str, Any]) -> None:
+                detail = ", ".join(f"{k}={v}" for k, v in info.items() if k not in ("source",))
+                bar.set_description_str(_STAGE_LABELS.get(stage, stage) + (f" ({detail})" if detail else ""))
+                bar.update(1)
+                if stage == "stored":
+                    bar.close()
+            return advance
+
     def report(stage: str, info: dict[str, Any]) -> None:
         detail = ", ".join(f"{k}={v}" for k, v in info.items() if k not in ("source",))
         print(f"  ✓ {_STAGE_LABELS.get(stage, stage)}" + (f"  ({detail})" if detail else ""), file=stream)

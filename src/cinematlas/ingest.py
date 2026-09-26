@@ -13,6 +13,7 @@ import uuid
 from collections.abc import Callable, Sequence
 from typing import Any, Protocol
 
+from . import tracing
 from ._utils import assign_segments, build_deep_link, split_long_spans
 from .exceptions import IngestionError, IngestionStatus
 from .results import IngestResult
@@ -70,6 +71,7 @@ def run_pipeline(
     started = time.perf_counter()
     stages: dict[str, float] = {}
     clock = [started]
+    clock_ns = [time.time_ns()]  # wall clock, for the stage spans
     usage = getattr(host, "usage", None)
     usage_before = usage.snapshot() if usage is not None else {}
 
@@ -77,68 +79,77 @@ def run_pipeline(
         now = time.perf_counter()
         stages[name] = round(now - clock[0], 3)
         clock[0] = now
+        now_ns = time.time_ns()
+        tracing.stage_span(f"cinematlas.ingest.{name}", clock_ns[0], now_ns, **info)
+        clock_ns[0] = now_ns
         if report:
             try:
                 report(name, info)
             except Exception:  # a broken progress callback must never break ingestion
                 logger.debug("progress callback raised", exc_info=True)
 
-    with tempfile.TemporaryDirectory() as temp_dir:
-        try:
-            video_path, audio_path = fetch(temp_dir)
-            if vid is None:
-                vid = id_from_content()
-            logger.info(f"Starting ingestion pipeline for Video ID: {vid} ({label})")
-            host._assert_decodable(video_path)
-            stage("fetched", video_id=vid, source=label, audio=audio_path is not None)
+    with tracing.span("cinematlas.ingest", source=label, source_type=source.get("source_type")) as root:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            try:
+                video_path, audio_path = fetch(temp_dir)
+                if vid is None:
+                    vid = id_from_content()
+                logger.info(f"Starting ingestion pipeline for Video ID: {vid} ({label})")
+                host._assert_decodable(video_path)
+                stage("fetched", video_id=vid, source=label, audio=audio_path is not None)
 
-            logger.info("Executing PySceneDetect visual cut analysis...")
-            spans = split_long_spans(host._detect_scene_spans(video_path, scene_threshold), host.max_scene_seconds)
-            scenes = host._extract_keyframes(video_path, spans, vid)
-            logger.info(f"Extracted {len(scenes)} visual scenes.")
-            stage("scenes", count=len(scenes))
+                logger.info("Executing PySceneDetect visual cut analysis...")
+                spans = split_long_spans(host._detect_scene_spans(video_path, scene_threshold), host.max_scene_seconds)
+                scenes = host._extract_keyframes(video_path, spans, vid)
+                logger.info(f"Extracted {len(scenes)} visual scenes.")
+                stage("scenes", count=len(scenes))
 
-            segments = host._transcribe_audio_safe(audio_path)
-            scene_segments = assign_segments([(s["start_sec"], s["end_sec"]) for s in scenes], segments)
-            transcripts = [" ".join(seg["text"] for seg in segs) for segs in scene_segments]
-            stage("transcribed", sentences=len(segments), spoken_scenes=sum(bool(t) for t in transcripts))
+                segments = host._transcribe_audio_safe(audio_path)
+                scene_segments = assign_segments([(s["start_sec"], s["end_sec"]) for s in scenes], segments)
+                transcripts = [" ".join(seg["text"] for seg in segs) for segs in scene_segments]
+                stage("transcribed", sentences=len(segments), spoken_scenes=sum(bool(t) for t in transcripts))
 
-            logger.info("Generating multimodal vectors via Voyage AI...")
-            embeddings = host._embed_keyframes_batched(
-                scenes, batch_size=batch_size, transcripts=transcripts if host.scene_embeddings else None)
-            mode = host.transcript_mode
-            client_side = mode == "client"
-            transcript_vecs = host._embed_transcripts(transcripts) if client_side else [None] * len(scenes)
-            stage("embedded", vectors=sum(v is not None for v in embeddings))
+                logger.info("Generating multimodal vectors via Voyage AI...")
+                embeddings = host._embed_keyframes_batched(
+                    scenes, batch_size=batch_size, transcripts=transcripts if host.scene_embeddings else None)
+                mode = host.transcript_mode
+                client_side = mode == "client"
+                transcript_vecs = host._embed_transcripts(transcripts) if client_side else [None] * len(scenes)
+                stage("embedded", vectors=sum(v is not None for v in embeddings))
 
-            documents = _documents(host, vid, ingest_id, mode, source, extra, deep_link_base, scenes, transcripts,
-                                   scene_segments, embeddings, transcript_vecs)
-            count = 0
-            if documents:
-                result = host.collection.insert_many(documents)
-                host.collection.delete_many({"video_id": vid, "ingest_id": {"$ne": ingest_id}})
-                count = len(result.inserted_ids)
-                logger.info(f"Successfully indexed {count} scenes into MongoDB Atlas!")
-            stage("stored", scenes=count)
-            return IngestResult(
-                video_id=vid, scenes=count, source_type=source["source_type"], transcript_mode=mode,
-                seconds=round(time.perf_counter() - started, 2), spoken_scenes=sum(bool(t) for t in transcripts),
-                stages=stages, usage=usage.since(usage_before) if usage is not None else {},
-            )
+                documents = _documents(host, vid, ingest_id, mode, source, extra, deep_link_base, scenes, transcripts,
+                                       scene_segments, embeddings, transcript_vecs)
+                count = 0
+                if documents:
+                    result = host.collection.insert_many(documents)
+                    host.collection.delete_many({"video_id": vid, "ingest_id": {"$ne": ingest_id}})
+                    count = len(result.inserted_ids)
+                    logger.info(f"Successfully indexed {count} scenes into MongoDB Atlas!")
+                stage("stored", scenes=count)
+                result = IngestResult(
+                    video_id=vid, scenes=count, source_type=source["source_type"], transcript_mode=mode,
+                    seconds=round(time.perf_counter() - started, 2), spoken_scenes=sum(bool(t) for t in transcripts),
+                    stages=stages, usage=usage.since(usage_before) if usage is not None else {},
+                )
+                if root is not None:
+                    root.set_attribute("cinematlas.video_id", vid)
+                    root.set_attribute("cinematlas.scenes", count)
+                tracing.set_usage(root, result.usage)
+                return result
 
-        except Exception as e:
-            logger.error(f"Ingestion failed for '{label}': {e}", exc_info=True)
-            if vid is not None:
-                try:
-                    host.collection.insert_one({
-                        "video_id": vid, **source, "ingest_id": ingest_id,
-                        "status": IngestionStatus.FAILED.value, "error_message": str(e), "updated_at": time.time(),
-                    })
-                except Exception:
-                    logger.error("Failed to write FAILED tombstone record.", exc_info=True)
-            if isinstance(e, IngestionError):
-                raise
-            raise IngestionError(f"Video ingestion failed: {e}") from e
+            except Exception as e:
+                logger.error(f"Ingestion failed for '{label}': {e}", exc_info=True)
+                if vid is not None:
+                    try:
+                        host.collection.insert_one({
+                            "video_id": vid, **source, "ingest_id": ingest_id,
+                            "status": IngestionStatus.FAILED.value, "error_message": str(e), "updated_at": time.time(),
+                        })
+                    except Exception:
+                        logger.error("Failed to write FAILED tombstone record.", exc_info=True)
+                if isinstance(e, IngestionError):
+                    raise
+                raise IngestionError(f"Video ingestion failed: {e}") from e
 
 
 def _documents(host: IngestHost, vid: str, ingest_id: str, mode: str, source: dict[str, Any],

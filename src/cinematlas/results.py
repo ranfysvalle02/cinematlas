@@ -1,25 +1,98 @@
 """Result types: plain dicts and lists underneath, pleasant to use on top.
 
-``SearchHit`` is a ``dict`` (JSON-serializable, backwards compatible) with attribute
-shortcuts; ``SearchResults`` is a ``list`` that prints as a readable table, renders as
-markdown in notebooks, and turns into LLM-ready context in one call.
+Every search returns a :class:`Hits` of :class:`Hit`. A hit is a ``dict`` of the stored document's
+fields (so ``json.dumps`` works and any field you stored comes back), plus attribute access and typed
+accessors for what every search adds: ``rank``, ``score``, ``moment``, ``text``, ``explain()``.
+Video scenes are :class:`SearchHit` (``timestamp``, ``link``, per-source ``ranks``); records from
+:mod:`cinematlas.core` are :class:`cinematlas.core.RecordHit`.
 """
 
 from collections.abc import Iterable
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, TypedDict
 
 from .retrieval import _clock, to_context
 
 
-class SearchHit(dict):
-    """One scene returned by a search. Every key is also reachable as an attribute."""
+class Moment(TypedDict, total=False):
+    """The best-matching sentence inside a hit, picked by the reranker."""
+
+    text: str
+    start: float  # video: seconds
+    end: float
+    relevance: float
+
+
+class Hit(dict):
+    """One search result: the stored document's fields, plus what the search added. Keys are attributes."""
 
     def __getattr__(self, name: str) -> Any:
         try:
             return self[name]
         except KeyError:
             raise AttributeError(name) from None
+
+    @property
+    def moment(self) -> Moment | None:
+        """The best-matching sentence (``None`` without a reranker or a moment field)."""
+        return self.get("moment")
+
+    @property
+    def score(self) -> float | None:
+        return self.get("score")
+
+    @property
+    def rank(self) -> int | None:
+        return self.get("rank")
+
+    @property
+    def text(self) -> str:
+        """The best-matching sentence, or ``""``."""
+        return ((self.get("moment") or {}).get("text") or "").strip()
+
+    def explain(self) -> str:
+        """Why this ranked."""
+        return f"score {self['score']:.4f}" if self.get("score") is not None else "unscored"
+
+
+class Hits(list):
+    """Ranked :class:`Hit` objects, best first."""
+
+    hit_type: type[Hit] = Hit
+
+    def __init__(self, hits: Iterable[dict] = ()):
+        super().__init__(h if isinstance(h, self.hit_type) else self.hit_type(h) for h in hits)
+
+    @property
+    def top(self) -> Any:
+        """The best hit, or ``None``."""
+        return self[0] if self else None
+
+    def to_context(self) -> str:
+        """Numbered, citable excerpts for any LLM prompt."""
+        return "\n\n".join(f"[{i}] {h.text}" for i, h in enumerate(self, 1))
+
+
+class SearchHit(Hit):
+    """One video scene: ``video_id``, ``scene_id``, the scene's transcript, and the moment that answers."""
+
+    @property
+    def video_id(self) -> str:
+        return self.get("video_id", "")
+
+    @property
+    def scene_id(self) -> int:
+        return self.get("scene_id", 0)
+
+    @property
+    def ranks(self) -> dict[str, int]:
+        """This scene's position in each source's list (``scene``, ``visual``, ``transcript``, ``text``, ``rerank``)."""
+        return self.get("ranks") or {}
+
+    @property
+    def relevance(self) -> float | None:
+        """The reranker's relevance for the moment."""
+        return self.get("relevance")
 
     @property
     def start(self) -> float:
@@ -58,11 +131,13 @@ class SearchHit(dict):
         return f"<SearchHit {self.get('video_id')}#{self.get('scene_id')} @ {self.timestamp} {snippet!r}>"
 
 
-class SearchResults(list):
+class SearchResults(Hits):
     """Ranked :class:`SearchHit` objects."""
 
+    hit_type = SearchHit
+
     def __init__(self, hits: Iterable[dict] = ()):
-        super().__init__(h if isinstance(h, SearchHit) else SearchHit(h) for h in hits)
+        super().__init__(hits)
         # Set by adaptive search: 0 = "about what's shown", 1 = "about what's said" (None if not routed).
         self.speech_confidence: float | None = None
         self.weights: dict[str, float] = {}  # effective fusion weights used for this query

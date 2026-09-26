@@ -13,11 +13,14 @@ reading); :class:`Search` adds the video sources, :class:`RecordSearch` the merg
 
 from __future__ import annotations
 
+import asyncio
 import dataclasses
+import threading
 from collections.abc import Iterator, Sequence
 from typing import TYPE_CHECKING, Any
 
 from . import search as _search
+from . import tracing
 from ._utils import build_match
 from .indexes import DEFAULT_AUTO_INDEX, DEFAULT_SCENE_INDEX, DEFAULT_TRANSCRIPT_INDEX, DEFAULT_VISUAL_INDEX
 from .results import SearchResults
@@ -37,10 +40,11 @@ class Query:
     k: int
     filters: tuple[tuple[str, Any], ...]
     _cache: list[Any]
+    _lock: threading.Lock
 
     # ------------------------------------------------------------------ builders
     def _with(self, **changes: Any) -> Any:
-        return dataclasses.replace(self, _cache=[], **changes)  # type: ignore[type-var]
+        return dataclasses.replace(self, _cache=[], _lock=threading.Lock(), **changes)  # type: ignore[type-var]
 
     def limit(self, k: int) -> Any:
         """How many results to return (default 5)."""
@@ -84,10 +88,27 @@ class Query:
 
     # ------------------------------------------------------------------ execution and reading
     def run(self) -> Any:
-        """Execute (once; later calls return the same results)."""
+        """Execute (once; later calls return the same results). Thread-safe: concurrent reads run it once."""
         if not self._cache:
-            self._cache.append(self._execute())
+            with self._lock:
+                if not self._cache:
+                    with tracing.span("cinematlas.search", kind=type(self).__name__, limit=self.k,
+                                      filters=len(self.filters)) as s:
+                        results = self._execute()
+                        if s is not None:
+                            s.set_attribute("cinematlas.results", len(results))
+                    self._cache.append(results)
         return self._cache[0]
+
+    async def arun(self) -> Any:
+        """:meth:`run` without blocking the event loop: the same ranking code, in a worker thread."""
+        if self._cache:
+            return self._cache[0]
+        return await asyncio.to_thread(self.run)
+
+    def __await__(self) -> Any:
+        """``hits = await engine.search(q).limit(3)``, for FastAPI and other async servers."""
+        return self.arun().__await__()
 
     def __iter__(self) -> Iterator[Any]:
         return iter(self.run())
@@ -101,10 +122,10 @@ class Query:
     def __bool__(self) -> bool:
         return bool(self.run())
 
-    def __eq__(self, other: object) -> bool:
-        return self.run() == (other.run() if isinstance(other, Query) else other)
-
-    __hash__ = None  # type: ignore[assignment]
+    # Equality and hashing are by identity (so queries work with asyncio.gather and as dict keys);
+    # compare results with ``q.run() == ...``.
+    __eq__ = object.__eq__
+    __hash__ = object.__hash__
 
     def __getattr__(self, name: str) -> Any:  # .top, .links, .to_context(), .speech_confidence, …
         if name.startswith("_"):  # never run a query for a private or dunder probe (copy, pickle, IPython)
@@ -145,6 +166,7 @@ class Search(Query):
     use_rerank: bool = True
     n_candidates: int | None = None
     _cache: list[SearchResults] = dataclasses.field(default_factory=list, repr=False)
+    _lock: threading.Lock = dataclasses.field(default_factory=threading.Lock, repr=False)
 
     def video(self, *video_ids: str) -> Search:
         """Only these videos. Calling it again adds to the set."""
@@ -239,6 +261,7 @@ class RecordSearch(Query):
     fusion: str | None = None  # set by .merged(): rank each part separately, then merge
     depth: int = 50
     _cache: list[Any] = dataclasses.field(default_factory=list, repr=False)
+    _lock: threading.Lock = dataclasses.field(default_factory=threading.Lock, repr=False)
 
     def merged(self, fusion: str = "rrf", *, depth: int = 50) -> RecordSearch:
         """The usual design, for comparison: search each part's own vector, then merge the rankings.

@@ -106,7 +106,7 @@ def test_visual_search_embeds_query_as_query_type(engine, fake_voyage, fake_mong
 @pytest.mark.parametrize("source", ["visual", "transcript"])
 def test_empty_query_short_circuits(engine, fake_voyage, fake_mongo, source):
     engine._resolved_transcript_mode = "autoembed"
-    assert engine.search("").only(source) == []
+    assert engine.search("").only(source).run() == []
     assert fake_voyage.calls == [] and fake_mongo.collection.pipelines == []
 
 

@@ -1,6 +1,6 @@
 # Up next
 
-What to build next, checked against the code as of 0.15.0. A lot of the outside wishlist was already
+What to build next, checked against the code as of 0.16.0. A lot of the outside wishlist was already
 built, so this file starts by saying what exists. That keeps us from building it twice.
 
 ## Already shipped (no work needed)
@@ -56,21 +56,32 @@ the story as simple as possible: **one video → scenes → the second that answ
    anyway). `cinematlas[video]` adds OpenCV, PySceneDetect and yt-dlp. Without it, ingest raises
    `DependencyError` naming the package and the extra. Checked in a clean venv: 92 MB, none of the
    video packages installed.
-4. **Typed models.** Now is the time to make the break, if we're going to: Pydantic v2 (or frozen
-   dataclasses) for `Scene`, `Hit`, and `IngestResult` instead of `dict` subclasses. Pick one and use it
-   everywhere.
-5. **Async search**: `AsyncCinematlas` built on `voyageai.AsyncClient` + `pymongo.AsyncMongoClient`.
-   Ingest stays sync, because it's CPU-bound.
-6. **Optional `tqdm`** for ingest progress.
+4. ~~**Typed models.**~~ **Done (0.16.0).** Results stay dicts, on purpose: hits carry arbitrary
+   stored fields, and plain JSON is the point. A single `Hit`/`Hits` base (`cinematlas.results`) has
+   attribute access and typed accessors (`rank`, `score`, `moment: Moment`, `text`, `explain()`).
+   Video `SearchHit` adds `video_id`/`scene_id`/`timestamp`/`link`/`ranks`; `core.RecordHit` and
+   `RecordHits` replace `core.Hit`/`Hits`. A record's own fields are never shadowed.
+5. ~~**Async search.**~~ **Done (0.16.0).** Every query is awaitable (`await engine.search(q)`,
+   `await q.arun()`). It runs the one ranking implementation in a worker thread instead of a second
+   async copy, so the paired check stays valid. Queries use identity equality and hashing (so
+   `asyncio.gather` works); concurrent reads of one query run it once. Live: 10 concurrent awaits gave
+   rankings identical to sequential runs, in 2.2s vs 4.8s.
+6. ~~**Optional `tqdm`.**~~ **Done (0.16.0).** `cinematlas[progress]` draws a bar over the five ingest
+   stages on a terminal. Otherwise the CLI prints one line per stage.
 
-Items 1–3 ship as one release. Next: item 4 (typed results; `SearchHit` and `core.Hit` are still two
-dict subclasses), then async search.
+## Phase 3
 
-## Phase 3: later / only on demand
+- ~~**OpenTelemetry spans.**~~ **Done (0.16.0).** `cinematlas[otel]` (API only; bring your own SDK and
+  exporter). `cinematlas.ingest` has a child per stage, and `cinematlas.search` covers each run; both
+  carry `cinematlas.voyage.*` usage. Without the extra, nothing changes.
+- **Generic `BaseEmbedder` / `BaseVectorStore`: decided against, not deferred.** The library's claim is
+  measured on Voyage + Atlas (joint vectors, `$rankFusion`, `$rerank`, autoEmbed), and a
+  provider-neutral layer would sit between users and exactly those features. The seams that make it
+  testable already exist (`IngestHost`, `SearchHost`, injectable clients). Revisit only if a real user
+  needs another provider.
 
-- Generic `BaseEmbedder` / `BaseVectorStore` for other providers. This cuts against the Voyage + Atlas
-  identity, so wait until someone actually needs it.
-- OpenTelemetry spans, built on the existing `stages` and `usage` hooks.
+**Nothing is left open.** New work starts as a new entry here, with its expected effect written down
+first.
 
 ## Rule for every item
 

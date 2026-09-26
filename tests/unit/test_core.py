@@ -296,7 +296,7 @@ def test_invalid_k(photos, bad):
 
 
 def test_empty_query_returns_nothing_without_calling_voyage(photos, voyage):
-    assert photos.search("   ") == [] and voyage.calls == []
+    assert photos.search("   ").run() == [] and voyage.calls == []
 
 
 def test_hits_print_and_become_llm_context(atlas, voyage):

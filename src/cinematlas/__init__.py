@@ -16,7 +16,7 @@ from .indexes import (
     transcript_vector_index_definition,
     visual_index_definition,
 )
-from .results import IngestResult, SearchHit, SearchResults
+from .results import Hit, Hits, IngestResult, Moment, SearchHit, SearchResults
 from .retrieval import to_context
 from .usage import MeteredVoyage, Usage
 
@@ -31,11 +31,14 @@ __all__ = [
     "CinematlasError",
     "DependencyError",
     "Diagnosis",
+    "Hit",
+    "Hits",
     "IndexStatus",
     "IngestResult",
     "IngestionError",
     "IngestionStatus",
     "MeteredVoyage",
+    "Moment",
     "SearchError",
     "SearchHit",
     "SearchResults",

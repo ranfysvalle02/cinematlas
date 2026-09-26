@@ -116,6 +116,23 @@ into dollars at the [prices](https://docs.voyageai.com/docs/pricing) you pass. R
 off longer than other errors, with jitter. A notebook version of this lives in
 [`docs/quickstart.ipynb`](https://github.com/ranfysvalle02/cinematlas/blob/main/docs/quickstart.ipynb).
 
+**In an async server**, await any query. It runs the same ranking code in a worker thread, so the
+event loop never blocks and concurrent searches overlap:
+
+```python
+@app.get("/search")
+async def search(q: str):
+    return [{"at": h.timestamp, "text": h.text, "link": h.link} for h in await engine.search(q).limit(5)]
+```
+
+**Results** are dicts underneath: every field you stored comes back, and `json.dumps` works. On top of
+that, every hit has `rank`, `score`, `moment` (`{text, start, end, relevance}`), `text` and `explain()`.
+Video hits (`SearchHit`) add `video_id`, `scene_id`, `timestamp`, `link` and per-source `ranks`.
+
+**Observability.** With `cinematlas[otel]`, each ingest is an OpenTelemetry span with one child per
+stage (fetch, scenes, speech, embed, store), and each search is a span. Both carry the Voyage calls and
+tokens they used. `cinematlas[progress]` draws a progress bar for `cinematlas ingest`.
+
 ---
 
 ## Beyond video: `cinematlas.core`

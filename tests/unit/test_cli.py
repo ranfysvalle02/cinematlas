@@ -176,3 +176,21 @@ def test_version_flag():
 
     out = subprocess.run([sys.executable, "-m", "cinematlas.cli", "--version"], capture_output=True, text=True)
     assert out.returncode == 0 and out.stdout.strip() == f"cinematlas {cinematlas.__version__}"
+
+
+def test_progress_is_a_tqdm_bar_on_a_terminal_and_lines_otherwise():
+    import io
+
+    from cinematlas.cli import _progress_printer
+
+    class Tty(io.StringIO):
+        def isatty(self):
+            return True
+
+    tty, pipe = Tty(), io.StringIO()
+    for stream in (tty, pipe):
+        report = _progress_printer(stream)
+        for stage in ("fetched", "scenes", "transcribed", "embedded", "stored"):
+            report(stage, {"count": 1})
+    assert "5/5" in tty.getvalue() and "stored in Atlas" in tty.getvalue()
+    assert pipe.getvalue().count("✓") == 5 and "5/5" not in pipe.getvalue()

@@ -29,7 +29,8 @@ def upload(file: UploadFile) -> dict:
 
 
 @app.get("/search")
-def search(q: str, k: int = 5, video_id: str | None = None) -> list[dict]:
-    """The best moments for a question, each with a link to the exact second."""
+async def search(q: str, k: int = 5, video_id: str | None = None) -> list[dict]:
+    """The best moments for a question, each with a link to the exact second. Awaiting never blocks the loop."""
+    hits = await eng.search(q).video(video_id or "").limit(min(k, 20))
     return [{"video_id": h.video_id, "at": h.timestamp, "text": h.text, "link": h.link, "why": h.explain()}
-            for h in eng.search(q).video(video_id or "").limit(min(k, 20))]
+            for h in hits]

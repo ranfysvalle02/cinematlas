@@ -1,23 +1,22 @@
-"""Search results: plain dicts and lists underneath, pleasant on top."""
+"""Record search results: the shared :class:`cinematlas.results.Hit` / ``Hits``, for any record."""
 
 from __future__ import annotations
 
 from typing import Any
 
+from ..results import Hit, Hits
 
-class Hit(dict):
-    """One record returned by a search. Every key is also an attribute."""
 
-    def __getattr__(self, name: str) -> Any:
-        try:
-            return self[name]
-        except KeyError:
-            raise AttributeError(name) from None
+class RecordHit(Hit):
+    """One record returned by a search: its stored fields plus ``rank``, ``score``, ``moment``."""
+
+    def _ident(self) -> Any:  # not a property: a record may have its own "key" field
+        return self.get("_key", self.get("_id"))
 
     @property
-    def text(self) -> str:
-        """The best-matching sentence if the collection has a moment field, else ``""``."""
-        return ((self.get("moment") or {}).get("text") or "").strip()
+    def ranks(self) -> dict[str, int]:
+        """Merged searches only: this record's position in each part's list."""
+        return self.get("ranks") or {}
 
     def explain(self) -> str:
         if self.get("ranks"):  # a merged result: its position in each part's list
@@ -29,27 +28,24 @@ class Hit(dict):
         return ", ".join(parts)
 
     def __repr__(self) -> str:
-        label = self.get("_key") or self.get("_id")
         snippet = (self.text[:60] + "…") if len(self.text) > 60 else self.text
-        return f"<Hit {label} rank={self.get('rank')} {snippet!r}>"
+        return f"<RecordHit {self._ident()} rank={self.get('rank')} {snippet!r}>"
 
 
-class Hits(list):
-    """Ranked :class:`Hit` objects, best first."""
+class RecordHits(Hits):
+    """Ranked :class:`RecordHit` objects, best first."""
+
+    hit_type = RecordHit
 
     def __init__(self, hits: Any = (), *, display: tuple[str, ...] = ()):
-        super().__init__(h if isinstance(h, Hit) else Hit(h) for h in hits)
+        super().__init__(hits)
         self.display = display  # fields shown when printed
 
-    @property
-    def top(self) -> Hit | None:
-        return self[0] if self else None
-
-    def _label(self, hit: Hit) -> str:
+    def _label(self, hit: RecordHit) -> str:
         for name in self.display:
             if hit.get(name):
                 return str(hit[name])
-        return str(hit.get("_key") or hit.get("_id"))
+        return str(hit._ident())
 
     def to_context(self) -> str:
         """Numbered, citable excerpts for any LLM prompt."""

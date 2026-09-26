@@ -104,3 +104,56 @@ def test_private_attribute_probes_never_run_a_query(atlas):
     q = atlas.collection("photos", embed=Text("title")).search("q")
     assert not hasattr(q, "_ipython_canary_method_should_not_exist_")
     assert atlas.vo.calls == []
+
+
+# ---------------------------------------------------------------- one result type
+def test_video_and_record_hits_share_one_base_and_stay_plain_json():
+    import json
+
+    from cinematlas import Hit, Hits, SearchHit, SearchResults
+    from cinematlas.core import RecordHit, RecordHits
+
+    scene = SearchResults([{"video_id": "v", "scene_id": 2, "score": 0.5, "rank": 1,
+                            "moment": {"text": " hi ", "start": 4.0, "end": 5.0, "relevance": 0.9}}])
+    record = RecordHits([{"_key": "k", "key": "own field", "score": 0.7, "rank": 1}])
+    assert isinstance(scene, Hits) and isinstance(record, Hits)
+    assert isinstance(scene.top, SearchHit) and isinstance(record.top, RecordHit) and isinstance(scene.top, Hit)
+    top = scene.top
+    assert (top.video_id, top.scene_id, top.text, top.moment["relevance"]) == ("v", 2, "hi", 0.9)
+    assert scene.top.ranks == {} and scene.top.relevance is None
+    assert record.top.key == "own field"  # a record's own fields are never shadowed
+    assert (record.top.score, record.top.rank, record.top.moment) == (0.7, 1, None)
+    assert json.loads(json.dumps(scene.top)) == dict(scene.top)  # plain dicts underneath
+
+
+# ---------------------------------------------------------------- async
+def test_awaiting_a_query_runs_the_same_search_off_the_event_loop(atlas):
+    import asyncio
+    import threading
+
+    photos = atlas.collection("photos", embed=Text("title"))
+    threads = []
+    photos._search = lambda *a, **k: threads.append(threading.get_ident()) or ["hit"]
+
+    async def main():
+        q = photos.search("telescope").limit(2)
+        first = await q
+        again = await q  # cached: no second search
+        others = await asyncio.gather(*(photos.search(f"q{i}") for i in range(5)))
+        return first, again, others
+
+    first, again, others = asyncio.run(main())
+    assert first == again == ["hit"] and others == [["hit"]] * 5
+    assert len(threads) == 6 and threading.get_ident() not in threads  # never on the loop's thread
+
+
+def test_concurrent_reads_of_one_query_run_it_once(atlas):
+    from concurrent.futures import ThreadPoolExecutor
+
+    photos = atlas.collection("photos", embed=Text("title"))
+    calls = []
+    photos._search = lambda *a, **k: calls.append(1) or ["hit"]
+    q = photos.search("telescope")
+    with ThreadPoolExecutor(8) as pool:
+        assert list(pool.map(lambda _: q.run(), range(32))) == [["hit"]] * 32
+    assert len(calls) == 1

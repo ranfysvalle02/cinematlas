@@ -142,7 +142,7 @@ def test_invalid_arguments_fail_when_building_the_query(indexed, build):
 
 
 def test_empty_query_short_circuits(indexed, fake_mongo):
-    assert indexed.search("") == [] and fake_mongo.collection.pipelines == []
+    assert indexed.search("").run() == [] and fake_mongo.collection.pipelines == []
 
 
 # ---------------------------------------------------------------- Atlas-native execution

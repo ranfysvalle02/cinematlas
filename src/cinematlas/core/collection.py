@@ -37,7 +37,7 @@ from .evaluate import EvalReport, mcnemar, normalize_questions, score
 from .fusion import MERGES
 from .loaders import Loader
 from .parts import EmbedInput, Joint, Part, as_joint, get_field
-from .results import Hit, Hits
+from .results import RecordHit, RecordHits
 
 logger = logging.getLogger("cinematlas")
 
@@ -348,16 +348,16 @@ class Collection:
         return RecordSearch(self, query)
 
     def _search(self, query: Any, k: int = 5, *, where: Mapping[str, Any] | None = None, moment: bool = True,
-                candidates: int | None = None) -> Hits:
+                candidates: int | None = None) -> RecordHits:
         if not isinstance(k, int) or k < 1:
             raise ValueError(f"k must be a positive integer, got {k!r}")
         inputs = _query_inputs(query)
         if not inputs:
-            return Hits(display=self.display)
+            return RecordHits(display=self.display)
         fetch = min(k * 8, MAX_CANDIDATES) if self.chunked else k
         rows = self._best_per_record(self._vector_search(VECTOR_PATH, self._query_vector(inputs), fetch, where,
                                                          candidates))[:k]
-        hits = Hits([Hit({**row, "rank": i}) for i, row in enumerate(rows, 1)], display=self.display)
+        hits = RecordHits([RecordHit({**row, "rank": i}) for i, row in enumerate(rows, 1)], display=self.display)
         text = " ".join(x for x in inputs if isinstance(x, str))
         if moment and self.moment and self.atlas.rerank_model and text and hits:
             self._attach_moments(text, hits)
@@ -400,7 +400,7 @@ class Collection:
             raise SearchError(f"Vector search failed on {self.index_name!r}: {e}. Did you run .setup()?") from e
 
     def _search_merged(self, query: Any, k: int = 5, *, where: Mapping[str, Any] | None = None, depth: int = 50,
-                       fusion: str = "rrf") -> Hits:
+                       fusion: str = "rrf") -> RecordHits:
         """Each part's own vector searched, then the rankings merged (``fusion``: rrf, sum, mnz, max)."""
         if fusion not in MERGES:
             raise ValueError(f"fusion must be one of {sorted(MERGES)}, got {fusion!r}")
@@ -408,7 +408,7 @@ class Collection:
             raise CinematlasError(".merged() needs per-part vectors: create the collection with late=True.")
         inputs = _query_inputs(query)
         if not inputs:
-            return Hits(display=self.display)
+            return RecordHits(display=self.display)
         vector = self._query_vector(inputs)
         docs: dict[Any, dict[str, Any]] = {}
         ranks: dict[Any, dict[str, int]] = {}
@@ -423,7 +423,7 @@ class Collection:
                 docs.setdefault(ident, row)
                 ranks.setdefault(ident, {})[name] = rank
         fused = MERGES[fusion](lists)[:k]
-        return Hits([Hit({**docs[d], "ranks": ranks[d], "rank": n}) for n, d in enumerate(fused, 1)],
+        return RecordHits([RecordHit({**docs[d], "ranks": ranks[d], "rank": n}) for n, d in enumerate(fused, 1)],
                     display=self.display)
 
     def evaluate(self, questions: Sequence[Mapping[str, Any]], k: int = 10, *,
@@ -451,7 +451,7 @@ class Collection:
         a_only, b_only, p = mcnemar(js.correct, ms.correct)
         return EvalReport(len(items), k, js, ms, a_only, b_only, p, rows)
 
-    def _attach_moments(self, query: str, hits: Hits) -> None:
+    def _attach_moments(self, query: str, hits: RecordHits) -> None:
         """Rerank every sentence of the hits' moment field; each hit keeps its best. Order is unchanged."""
         owners, sentences = [], []
         for i, hit in enumerate(hits):

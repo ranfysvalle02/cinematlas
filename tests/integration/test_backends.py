@@ -127,8 +127,10 @@ def _assert_real_clip_searchable(eng, vid):
     assert set(hits[0]["ranks"]) == {"scene", "rerank"}
 
     # Adaptive routing: every source fused in one $rankFusion query, same scene, same moment.
-    fused = eventually(lambda: (r := eng.search(question).limit(3).video(vid).routing("adaptive"))
-                       and "rerank" in r[0]["ranks"] and r)
+    # Atlas syncs each search index separately: wait until every source has caught up with this clip.
+    everything = {"visual", "scene", "transcript", "rerank"}
+    fused = eventually(lambda: (r := eng.search(question).limit(3).video(vid).routing("adaptive").run())
+                       and everything <= set(r[0]["ranks"]) and r)
     assert fused and fused[0]["scene_id"] == 3 and "medals" in fused[0]["moment"]["text"].lower()
     assert set(fused[0]["ranks"]) >= {"visual", "scene", "transcript", "rerank"}
 

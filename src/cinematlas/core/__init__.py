@@ -20,15 +20,15 @@ from .evaluate import EvalReport, mcnemar
 from .loaders import ImageFolder, JSONLines, Loader, PDFPages, Screenshots, Slides
 from .parts import Image, Joint, Part, Text, get_field, load_image
 from .registry import plugin, plugins
-from .results import Hit, Hits
+from .results import RecordHit, RecordHits
 
 __all__ = [
     "AddResult",
     "Atlas",
     "Collection",
     "EvalReport",
-    "Hit",
-    "Hits",
+    "RecordHit",
+    "RecordHits",
     "Image",
     "ImageFolder",
     "JSONLines",
